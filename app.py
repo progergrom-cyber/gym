@@ -14,6 +14,8 @@ import planner
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+PHOTO_DIR = os.path.join(STATIC_DIR, "photos")
+os.makedirs(PHOTO_DIR, exist_ok=True)
 
 
 def load_secret_key():
@@ -34,6 +36,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("GYM_INSECURE_COOKIE") != "1",
     JSON_AS_ASCII=False,
+    MAX_CONTENT_LENGTH=5 * 1024 * 1024,  # не больше 5 МБ за один запрос
 )
 app.json.ensure_ascii = False
 app.json.sort_keys = False
@@ -68,6 +71,11 @@ class ApiError(Exception):
 @app.errorhandler(ApiError)
 def handle_api_error(e):
     return jsonify(error=e.message), e.status
+
+
+@app.errorhandler(413)
+def too_large(_e):
+    return jsonify(error="Файл слишком большой (максимум 5 МБ)"), 413
 
 
 def body():
@@ -338,6 +346,62 @@ def update_exercise(ex_id):
         raise ApiError("Упражнение не найдено", 404)
     db.save_exercise(conn, exercise_from_request(body()), ex_id)
     conn.commit()
+    return jsonify(ok=True)
+
+
+def image_ext(data):
+    """Определить формат картинки по первым байтам файла."""
+    if data[:3] == bytes([0xFF, 0xD8, 0xFF]):
+        return ".jpg"
+    if data[:8] == bytes([0x89]) + b"PNG" + bytes([13, 10, 26, 10]):
+        return ".png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def remove_photo_file(name):
+    if name:
+        path = os.path.join(PHOTO_DIR, os.path.basename(name))
+        if os.path.exists(path):
+            os.remove(path)
+
+
+@app.post("/api/exercises/<int:ex_id>/photo")
+@login_required
+def upload_photo(ex_id):
+    conn = get_db()
+    row = conn.execute("SELECT photo FROM exercises WHERE id=?",
+                       (ex_id,)).fetchone()
+    if not row:
+        raise ApiError("Упражнение не найдено", 404)
+    f = request.files.get("photo")
+    if not f:
+        raise ApiError("Фото не выбрано")
+    data = f.read()
+    ext = image_ext(data)
+    if not ext:
+        raise ApiError("Нужна картинка в формате JPG, PNG или WebP")
+    name = f"ex{ex_id}_{secrets.token_hex(6)}{ext}"
+    with open(os.path.join(PHOTO_DIR, name), "wb") as out:
+        out.write(data)
+    conn.execute("UPDATE exercises SET photo=? WHERE id=?", (name, ex_id))
+    conn.commit()
+    remove_photo_file(row["photo"])
+    return jsonify(ok=True, photo_url="/static/photos/" + name)
+
+
+@app.delete("/api/exercises/<int:ex_id>/photo")
+@login_required
+def delete_photo(ex_id):
+    conn = get_db()
+    row = conn.execute("SELECT photo FROM exercises WHERE id=?",
+                       (ex_id,)).fetchone()
+    if not row:
+        raise ApiError("Упражнение не найдено", 404)
+    conn.execute("UPDATE exercises SET photo=NULL WHERE id=?", (ex_id,))
+    conn.commit()
+    remove_photo_file(row["photo"])
     return jsonify(ok=True)
 
 

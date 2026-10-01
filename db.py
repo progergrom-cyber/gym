@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS exercises (
     kind TEXT NOT NULL,
     region TEXT NOT NULL,
     stress TEXT NOT NULL DEFAULT '[]',
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    photo TEXT
 );
 CREATE TABLE IF NOT EXISTS workouts (
     id INTEGER PRIMARY KEY,
@@ -78,6 +79,10 @@ def connect(path=None):
 
 def init_db(conn):
     conn.executescript(SCHEMA)
+    # Обновление старой базы: колонка для фото появилась во второй версии
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(exercises)")}
+    if "photo" not in cols:
+        conn.execute("ALTER TABLE exercises ADD COLUMN photo TEXT")
     if conn.execute("SELECT COUNT(*) FROM exercises").fetchone()[0] == 0:
         for e in SEED:
             save_exercise(conn, e)
@@ -88,6 +93,7 @@ def exercise_to_dict(row):
     d = dict(row)
     d["stress"] = json.loads(d["stress"] or "[]")
     d["active"] = bool(d["active"])
+    d["photo_url"] = ("/static/photos/" + d["photo"]) if d.get("photo") else None
     return d
 
 

@@ -132,6 +132,7 @@ def _item(ex, profile, minutes, history, extra_sets=0):
         "exercise_id": ex["id"],
         "name": ex["name"],
         "equipment": ex.get("equipment", ""),
+        "photo": ex.get("photo_url"),
         "muscle": ex["muscle"],
         "muscle_label": MUSCLES.get(ex["muscle"], (ex["muscle"],))[0],
         "kind": ex["kind"],

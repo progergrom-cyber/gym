@@ -122,6 +122,17 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(alt["muscle"], "back_lats")
             self.assertNotIn(alt["exercise_id"], plan_ids)
 
+    def test_photo_in_plan(self):
+        cat = catalog()
+        for e in cat:
+            e["photo_url"] = f"/static/photos/ex{e['id']}.jpg"
+        plan = planner.build_plan(cat, profile(), 45, "upper", seed=9)
+        for item in plan["items"]:
+            self.assertEqual(item["photo"],
+                             f"/static/photos/ex{item['exercise_id']}.jpg")
+            for alt in item["alternatives"]:
+                self.assertTrue(alt["photo"])
+
     def test_gaps_reported(self):
         plan = planner.build_plan(catalog(), profile(), 60, "upper", seed=8)
         gap_muscles = {g["muscle"] for g in plan["gaps"]}

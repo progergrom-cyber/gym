@@ -1,6 +1,6 @@
 'use strict';
 // Service worker: сохраняет приложение в телефоне, чтобы оно открывалось без интернета.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const STATIC_CACHE = 'gym-static-' + VERSION;
 const API_CACHE = 'gym-api';
 

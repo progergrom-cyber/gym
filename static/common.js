@@ -52,7 +52,9 @@ class ApiError extends Error {
 // Запрос к серверу. Возвращает JSON или бросает ApiError.
 async function api(method, path, data) {
   const opts = { method, credentials: 'same-origin', headers: {} };
-  if (data !== undefined) {
+  if (data instanceof FormData) {
+    opts.body = data;  // файл (фото) — браузер сам выставит заголовки
+  } else if (data !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(data);
   }
@@ -130,6 +132,24 @@ const ICONS = {
   progress: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18M5 16l4-5 4 3 6-8"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
 };
+
+// Заглушка вместо фото тренажёра
+const DUMBBELL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 7v10M18 7v10M3 10v4M21 10v4M6 12h12"/></svg>';
+
+// Показать фото на весь экран (нажатие закрывает)
+function showPhoto(url) {
+  let dlg = $('#photo-view');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'photo-view';
+    dlg.className = 'photo-view';
+    dlg.innerHTML = '<img alt="Фото тренажёра">';
+    dlg.addEventListener('click', () => dlg.close());
+    document.body.appendChild(dlg);
+  }
+  dlg.querySelector('img').src = url;
+  dlg.showModal();
+}
 
 function renderNav(active) {
   const tabs = [

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f1216">
+  <meta name="theme-color" content="#0b0c0f">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
@@ -12,7 +12,7 @@
 </head>
 <body>
   <header class="top">
-    <h1>Профиль</h1>
+    <div><span class="eyebrow">Настройки</span><h1>Профиль</h1></div>
     <span id="net" class="net" hidden>офлайн</span>
   </header>
   <main>
@@ -72,6 +72,12 @@
   <dialog id="ex-dialog">
     <form id="ex-form" method="dialog">
       <h3 id="ex-title">Упражнение</h3>
+      <div class="photo-box" id="ex-photo-box"></div>
+      <div class="photo-actions">
+        <button class="btn small ghost" type="button" id="ex-photo-pick">📷 Добавить фото</button>
+        <button class="btn small ghost danger" type="button" id="ex-photo-del" hidden>Удалить</button>
+      </div>
+      <input type="file" id="ex-photo-input" accept="image/*" hidden>
       <label class="field"><span>Название *</span><input name="name" required maxlength="120"></label>
       <label class="field"><span>Тренажёр / оборудование</span>
         <input name="equipment" maxlength="80" placeholder="Technogym, гантели…"></label>

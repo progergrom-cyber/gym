@@ -105,10 +105,14 @@ function renderCatalog() {
     <div class="card" style="margin-top:0">
       ${g.list.map(e => `
         <div class="row ${e.active ? '' : 'off'}" data-id="${e.id}">
-          <button class="row-btn grow" type="button">
-            ${esc(e.name)}
-            <small>${esc(e.equipment || '—')} · ${e.kind === 'compound' ? 'база' : 'изоляция'}${
-              e.stress.length ? ' · ⚠️ ' + e.stress.map(s => INJURY_LABELS[s]).join(', ') : ''}</small>
+          <button class="row-btn" type="button">
+            <span class="thumb">${e.photo_url
+              ? `<img src="${esc(e.photo_url)}" alt="" loading="lazy">` : DUMBBELL_SVG}</span>
+            <span class="grow">
+              ${esc(e.name)}
+              <small>${esc(e.equipment || '—')} · ${e.kind === 'compound' ? 'база' : 'изоляция'}${
+                e.stress.length ? ' · ⚠ ' + e.stress.map(s => INJURY_LABELS[s]).join(', ') : ''}</small>
+            </span>
           </button>
           <label class="switch" aria-label="Включено">
             <input type="checkbox" class="toggle" ${e.active ? 'checked' : ''}><span></span>
@@ -160,7 +164,78 @@ function openEditor(id) {
   fields.active.checked = ex.active;
   exForm.querySelectorAll('[name=stress]').forEach(c => { c.checked = ex.stress.includes(c.value); });
   $('#ex-error').textContent = '';
+  photoChange = null;
+  currentPhoto = ex.photo_url || null;
+  renderPhotoBox();
   dialog.showModal();
+}
+
+// ---------- фото тренажёра ----------
+
+let photoChange = null;   // null — без изменений, Blob — новое фото, 'delete' — удалить
+let currentPhoto = null;  // адрес текущего фото на сервере
+let previewUrl = null;
+
+function renderPhotoBox() {
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  let src = null;
+  if (photoChange instanceof Blob) src = previewUrl = URL.createObjectURL(photoChange);
+  else if (photoChange !== 'delete') src = currentPhoto;
+  $('#ex-photo-box').innerHTML = src
+    ? `<img src="${esc(src)}" alt="Фото тренажёра">`
+    : 'Фото нет — сфотографируйте тренажёр, чтобы его было легко найти в зале';
+  $('#ex-photo-pick').textContent = src ? '📷 Заменить' : '📷 Добавить фото';
+  $('#ex-photo-del').hidden = !src;
+}
+
+// Уменьшаем фото на телефоне до ~1000 px, чтобы оно весило 100–200 КБ
+async function compressImage(file, maxSide = 1000, quality = 0.82) {
+  let img;
+  try {
+    img = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch (e) {
+    img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Не удалось открыть картинку'));
+      el.src = URL.createObjectURL(file);
+    });
+  }
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => canvas.toBlob(
+    b => (b ? resolve(b) : reject(new Error('Не удалось сжать фото'))), 'image/jpeg', quality));
+}
+
+$('#ex-photo-pick').addEventListener('click', () => $('#ex-photo-input').click());
+$('#ex-photo-del').addEventListener('click', () => { photoChange = 'delete'; renderPhotoBox(); });
+$('#ex-photo-input').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    photoChange = await compressImage(file);
+    renderPhotoBox();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('#ex-photo-box').addEventListener('click', () => {
+  const img = $('#ex-photo-box img');
+  if (img) showPhoto(img.src);
+});
+
+async function savePhoto(exId) {
+  if (photoChange instanceof Blob) {
+    const form = new FormData();
+    form.append('photo', photoChange, 'photo.jpg');
+    await api('POST', `/api/exercises/${exId}/photo`, form);
+  } else if (photoChange === 'delete' && currentPhoto) {
+    await api('DELETE', `/api/exercises/${exId}/photo`);
+  }
 }
 
 $('#add-ex').addEventListener('click', () => openEditor(null));
@@ -176,8 +251,11 @@ exForm.addEventListener('submit', async e => {
     stress: [...exForm.querySelectorAll('[name=stress]:checked')].map(c => c.value),
   };
   try {
-    if (editingId) await api('PUT', `/api/exercises/${editingId}`, data);
-    else await api('POST', '/api/exercises', data);
+    let id = editingId;
+    if (id) await api('PUT', `/api/exercises/${id}`, data);
+    else id = (await api('POST', '/api/exercises', data)).id;
+    editingId = id;  // если фото не загрузится, повторное «Сохранить» не создаст дубль
+    await savePhoto(id);
     dialog.close();
     toast('Сохранено ✓');
     loadCatalog();

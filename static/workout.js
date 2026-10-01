@@ -3,6 +3,7 @@
 
 const MINUTES = [30, 45, 60, 90];
 const KINDS = { upper: 'Верх', lower: 'Низ', full: 'Фулбади' };
+const KIND_HINTS = { upper: 'грудь, спина, руки', lower: 'ноги и ягодицы', full: 'всё тело' };
 
 const root = $('#app');
 let me = null;
@@ -28,23 +29,25 @@ function renderSetup(message) {
     ${message ? `<div class="note ok">${esc(message)}</div>` : ''}
     ${needProfile ? `<div class="note warn">Заполните рост в разделе
       <a href="/settings">Профиль</a> и вес в разделе <a href="/progress#body">Прогресс</a>.</div>` : ''}
-    <div class="card">
-      <div class="small muted">Цель и режим</div>
-      <div>${esc(GOAL_LABELS[p.goal] || '—')} · ${p.freq || 3} раза в неделю</div>
-      ${injuries ? `<div class="small" style="color:var(--warn)">Ограничения: ${esc(injuries)}</div>` : ''}
-      <a class="small" href="/settings">Изменить</a>
+    <div class="card profile-line">
+      <div class="grow">
+        <div style="font-weight:700">${esc(GOAL_LABELS[p.goal] || '—')}</div>
+        <span class="chip">${p.freq || 3} раза в неделю</span>
+        ${injuries ? `<span class="chip warn">⚠ ${esc(injuries)}</span>` : ''}
+      </div>
+      <a class="btn small ghost" href="/settings">Изменить</a>
     </div>
 
-    <h2>Сколько есть времени?</h2>
-    <div class="seg" id="minutes">
+    <h2>Сколько есть времени</h2>
+    <div class="tiles" id="minutes">
       ${MINUTES.map(m => `<button type="button" data-v="${m}"
-        class="${m === choice.minutes ? 'on' : ''}">${m} мин</button>`).join('')}
+        class="tile ${m === choice.minutes ? 'on' : ''}"><b>${m}</b><small>минут</small></button>`).join('')}
     </div>
 
-    <h2>Что тренируем?</h2>
-    <div class="seg" id="kind">
+    <h2>Что тренируем</h2>
+    <div class="tiles three" id="kind">
       ${Object.entries(KINDS).map(([k, label]) => `<button type="button" data-v="${k}"
-        class="${k === choice.kind ? 'on' : ''}">${label}</button>`).join('')}
+        class="tile ${k === choice.kind ? 'on' : ''}"><b>${label}</b><small>${KIND_HINTS[k]}</small></button>`).join('')}
     </div>
 
     <button class="btn primary big" id="make" type="button">Составить план</button>
@@ -95,51 +98,62 @@ function planMinutes() {
 function renderItem(item, idx) {
   const done = item.log.filter(s => s.done).length;
   const started = done > 0;
+  const complete = done === item.log.length;
   return `
-  <article class="card ex ${done === item.log.length ? 'complete' : ''}" data-i="${idx}">
-    <div class="ex-top">
-      <span class="num">${done === item.log.length ? '✓' : idx + 1}</span>
-      <div>
-        <h3>${esc(item.name)}</h3>
-        <div class="small muted">${esc(item.equipment)} · ${esc(item.muscle_label)} ·
-          ${item.kind === 'compound' ? 'база' : 'изоляция'}</div>
+  <article class="card ex ${complete ? 'complete' : ''}" data-i="${idx}">
+    ${item.photo ? `<button class="ex-photo" type="button" data-photo="${esc(item.photo)}"
+      aria-label="Открыть фото тренажёра"><img src="${esc(item.photo)}" alt="" loading="lazy"></button>` : ''}
+    <div class="ex-body">
+      <div class="ex-top">
+        <span class="num">${complete ? '✓' : idx + 1}</span>
+        <div>
+          <h3>${esc(item.name)}</h3>
+          <div class="meta">${esc(item.equipment)}${item.equipment ? ' · ' : ''}${esc(item.muscle_label)}</div>
+        </div>
       </div>
-    </div>
-    <div class="presc">${item.sets} × ${item.rep_lo}–${item.rep_hi} повт. · отдых ${fmtSec(item.rest)}</div>
-    <div class="hint">💡 ${esc(item.hint)}</div>
-    <div class="sets">
-      <div class="set-head"><span>№</span><span>Вес, кг</span><span>Повторы</span><span></span></div>
-      ${item.log.map((s, j) => `
-        <div class="set ${s.done ? 'done' : ''}" data-j="${j}">
-          <span class="set-no">${j + 1}</span>
-          <input class="w" inputmode="decimal" autocomplete="off" aria-label="Вес, подход ${j + 1}"
-            value="${esc(typeof s.weight === 'number' ? fmtNum(s.weight) : s.weight)}" placeholder="кг" ${s.done ? 'readonly' : ''}>
-          <input class="r" inputmode="numeric" autocomplete="off" aria-label="Повторы, подход ${j + 1}"
-            value="${esc(s.reps)}" placeholder="${item.rep_lo}–${item.rep_hi}" ${s.done ? 'readonly' : ''}>
-          <button class="check" type="button" aria-label="Подход выполнен">${s.done ? '✓' : ''}</button>
-        </div>`).join('')}
-    </div>
-    <div class="ex-actions">
-      <button class="btn small ghost add-set" type="button">+ подход</button>
-      ${started ? '' : '<button class="btn small ghost replace" type="button">🔄 Заменить</button>'}
+      <div class="presc">
+        <span>${item.sets} × ${item.rep_lo}–${item.rep_hi}</span>
+        <span>отдых ${fmtSec(item.rest)}</span>
+        <span>${item.kind === 'compound' ? 'база' : 'изоляция'}</span>
+      </div>
+      <div class="hint">${esc(item.hint)}</div>
+      <div class="sets">
+        <div class="set-head"><span>#</span><span>Вес, кг</span><span>Повторы</span><span></span></div>
+        ${item.log.map((s, j) => `
+          <div class="set ${s.done ? 'done' : ''}" data-j="${j}">
+            <span class="set-no">${j + 1}</span>
+            <input class="w" inputmode="decimal" autocomplete="off" aria-label="Вес, подход ${j + 1}"
+              value="${esc(typeof s.weight === 'number' ? fmtNum(s.weight) : s.weight)}" placeholder="кг" ${s.done ? 'readonly' : ''}>
+            <input class="r" inputmode="numeric" autocomplete="off" aria-label="Повторы, подход ${j + 1}"
+              value="${esc(s.reps)}" placeholder="${item.rep_lo}–${item.rep_hi}" ${s.done ? 'readonly' : ''}>
+            <button class="check" type="button" aria-label="Подход выполнен">${s.done ? '✓' : ''}</button>
+          </div>`).join('')}
+      </div>
+      <div class="ex-actions">
+        <button class="btn small ghost add-set" type="button">+ подход</button>
+        ${started ? '' : '<button class="btn small ghost replace" type="button">Заменить</button>'}
+      </div>
     </div>
   </article>`;
 }
 
 function renderPlan() {
   const warnings = plan.warnings || [];
+  const total = plan.items.reduce((n, i) => n + i.log.length, 0);
+  const done = plan.items.reduce((n, i) => n + i.log.filter(s => s.done).length, 0);
+  const pct = total ? Math.round(done / total * 100) : 0;
   root.innerHTML = `
-    <div class="plan-head">
-      <div>
-        <div class="h">${esc(plan.kind_label)} · ≈${planMinutes()} мин</div>
-        <div class="small muted">${esc(fmtDate(plan.date))} · вы выбрали ${plan.minutes} мин</div>
-      </div>
+    <div class="hero">
+      <div class="h">${esc(plan.kind_label)} · ${planMinutes()} мин</div>
+      <div class="small muted">${esc(fmtDate(plan.date))} · ${plan.items.length} упражнений · лимит ${plan.minutes} мин</div>
+      <div class="progress"><i style="width:${pct}%"></i></div>
+      <div class="hero-stats"><span>Сделано подходов: ${done} из ${total}</span><span>${pct}%</span></div>
     </div>
     ${warnings.length ? `<details class="note warn"><summary>Подсказки (${warnings.length})</summary>
       <ul>${warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
     <div class="card">
-      <b>Разминка ~${plan.warmup_min} мин</b>
-      <div class="small muted">5 минут лёгкого кардио (велотренажёр, эллипс) и вращения в плечах,
+      <h3>Разминка ~${plan.warmup_min} мин</h3>
+      <div class="small muted" style="margin-top:4px">5 минут лёгкого кардио (велотренажёр, эллипс) и вращения в плечах,
         локтях, коленях. В базовых упражнениях первый подход можно сделать с половиной веса.</div>
     </div>
     ${plan.items.map(renderItem).join('')}
@@ -170,6 +184,10 @@ root.addEventListener('click', e => {
   const idx = Number(card.dataset.i);
   const item = plan.items[idx];
 
+  if (e.target.closest('.ex-photo')) {
+    showPhoto(e.target.closest('.ex-photo').dataset.photo);
+    return;
+  }
   if (e.target.closest('.check')) {
     const row = e.target.closest('.set');
     toggleSet(item, Number(row.dataset.j), row);
@@ -201,9 +219,8 @@ function toggleSet(item, j, row) {
   s.weight = weight ?? 0;
   s.reps = reps;
   s.done = true;
-  // Подставим этот вес в следующий подход
-  const next = item.log[j + 1];
-  if (next && !next.done) next.weight = s.weight;
+  // Подставим этот вес во все следующие подходы
+  item.log.slice(j + 1).forEach(next => { if (!next.done) next.weight = s.weight; });
   save();
   renderPlan();
   const allDone = plan.items.every(i => i.log.every(x => x.done));
@@ -281,9 +298,13 @@ let timerEnd = store.get('timer_end');
 let timerTick = null;
 let audioCtx = null;
 
+let timerTotal = store.get('timer_total', 90);
+
 function startTimer(sec) {
   timerEnd = Date.now() + sec * 1000;
+  timerTotal = sec;
   store.set('timer_end', timerEnd);
+  store.set('timer_total', timerTotal);
   try {   // звук можно включить только после нажатия пользователя
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
   } catch (e) { audioCtx = null; }
@@ -299,6 +320,7 @@ function runTimer() {
     const left = Math.ceil((timerEnd - Date.now()) / 1000);
     if (left <= 0) { timerDone(); return; }
     $('#timer-left').textContent = fmtSec(left);
+    $('#timer-bar').style.width = Math.min(100, left / timerTotal * 100) + '%';
   };
   update();
   timerTick = setInterval(update, 250);
@@ -337,7 +359,12 @@ function beep() {
 }
 
 $('#t-plus').addEventListener('click', () => {
-  if (timerEnd) { timerEnd += 30000; store.set('timer_end', timerEnd); }
+  if (timerEnd) {
+    timerEnd += 30000;
+    timerTotal += 30;
+    store.set('timer_end', timerEnd);
+    store.set('timer_total', timerTotal);
+  }
   else startTimer(30);
 });
 $('#t-skip').addEventListener('click', stopTimer);
@@ -369,6 +396,8 @@ function releaseScreen() {
 // ---------- запуск ----------
 
 renderNav('workout');
+$('#today').textContent = new Date().toLocaleDateString('ru-RU',
+  { weekday: 'long', day: 'numeric', month: 'long' });
 if (timerEnd && timerEnd < Date.now()) { timerEnd = null; store.del('timer_end'); }
 
 (async () => {
