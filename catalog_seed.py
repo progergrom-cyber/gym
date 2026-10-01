@@ -1,0 +1,74 @@
+"""Стартовый каталог тренажёров клуба.
+
+muscle  — основная группа мышц (ключ из planner.MUSCLES)
+target  — какие мышцы работают (текст для человека)
+helpers — вспомогательные мышцы (текст)
+kind    — compound (база) / isolation (изоляция)
+region  — upper (верх) / lower (низ) / core (пресс, поясница)
+stress  — какие зоны нагружает: knees, lower_back, shoulders, elbows
+active  — включено ли упражнение
+"""
+
+SEED = [
+    dict(name="Подъём на носки сидя", equipment="Foreman", muscle="calves",
+         target="камбаловидная", helpers="икроножная", kind="isolation",
+         region="lower", stress=[], active=True),
+    dict(name="Жим ногами", equipment="Technogym", muscle="quads",
+         target="квадрицепс", helpers="ягодицы, задняя поверхность бедра",
+         kind="compound", region="lower", stress=["knees"], active=True),
+    dict(name="Разгибание голени сидя в блочном тренажёре", equipment="Matrix",
+         muscle="quads", target="квадрицепс", helpers="", kind="isolation",
+         region="lower", stress=["knees"], active=True),
+    dict(name="Сгибание голени (сидя)", equipment="Technogym",
+         muscle="hamstrings", target="задняя поверхность бедра", helpers="",
+         kind="isolation", region="lower", stress=[], active=True),
+    dict(name="Отведение плеча с гантелями (махи в стороны)",
+         equipment="Гантели", muscle="delts_side", target="средние дельты",
+         helpers="", kind="isolation", region="upper", stress=["shoulders"],
+         active=True),
+    dict(name="Кроссовер: сгибание на бицепс", equipment="Technogym",
+         muscle="biceps", target="бицепс", helpers="", kind="isolation",
+         region="upper", stress=["elbows"], active=True),
+    dict(name="Молот с гантелями", equipment="Гантели", muscle="biceps",
+         target="плечелучевая, плечевая", helpers="бицепс", kind="isolation",
+         region="upper", stress=["elbows"], active=True),
+    dict(name="Кроссовер: разгибание на трицепс с V-рукоятью",
+         equipment="Matrix", muscle="triceps", target="трицепс", helpers="",
+         kind="isolation", region="upper", stress=["elbows"], active=True),
+    dict(name="Вертикальная тяга тросовая", equipment="Technogym",
+         muscle="back_lats", target="широчайшие", helpers="бицепс, плечевая",
+         kind="compound", region="upper", stress=[], active=True),
+    dict(name="Кроссовер: вертикальная тяга", equipment="Matrix",
+         muscle="back_lats", target="широчайшие", helpers="бицепс, плечевая",
+         kind="compound", region="upper", stress=[], active=True),
+    dict(name="Жим от груди наклонный", equipment="Matrix (рычажный, с блинами)",
+         muscle="chest", target="верх груди, грудь",
+         helpers="трицепс, передние дельты", kind="compound", region="upper",
+         stress=["shoulders"], active=True),
+    dict(name="Жим от груди", equipment="Matrix (блочный)", muscle="chest",
+         target="грудь", helpers="передние дельты, трицепс", kind="compound",
+         region="upper", stress=["shoulders"], active=True),
+    dict(name="Приведение плеча горизонтальное (бабочка)",
+         equipment="Technogym", muscle="chest", target="грудь", helpers="",
+         kind="isolation", region="upper", stress=["shoulders"], active=True),
+
+    # Запасные: выключены, включите, если нашли такой тренажёр в клубе
+    dict(name="Горизонтальная тяга в блочном тренажёре", equipment="Блок",
+         muscle="back_mid", target="середина спины, широчайшие",
+         helpers="задние дельты, бицепс", kind="compound", region="upper",
+         stress=[], active=False),
+    dict(name="Обратная бабочка (разведение на задние дельты)",
+         equipment="Тренажёр «бабочка»", muscle="delts_rear",
+         target="задние дельты", helpers="трапеции, ромбовидные",
+         kind="isolation", region="upper", stress=[], active=False),
+    dict(name="Скручивания на пресс", equipment="Тренажёр или коврик",
+         muscle="abs", target="прямая мышца живота", helpers="",
+         kind="isolation", region="core", stress=[], active=False),
+    dict(name="Гиперэкстензия", equipment="Скамья для гиперэкстензии",
+         muscle="lower_back", target="разгибатели спины",
+         helpers="ягодицы, задняя поверхность бедра", kind="isolation",
+         region="core", stress=["lower_back"], active=False),
+    dict(name="Отведение бедра в тренажёре", equipment="Тренажёр",
+         muscle="glutes", target="средняя ягодичная", helpers="",
+         kind="isolation", region="lower", stress=[], active=False),
+]

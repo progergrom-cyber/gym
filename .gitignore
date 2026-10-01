@@ -1,0 +1,7 @@
+# Личные данные и секреты — не загружать в GitHub
+gym.db
+gym.db-journal
+secret_key.txt
+__pycache__/
+*.pyc
+.claude/

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1216">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+  <title>Прогресс</title>
+</head>
+<body>
+  <header class="top">
+    <h1>Прогресс</h1>
+    <span id="net" class="net" hidden>офлайн</span>
+  </header>
+  <main>
+    <div class="seg tabs" id="tabs">
+      <button type="button" data-tab="history" class="on">Тренировки</button>
+      <button type="button" data-tab="body">Замеры тела</button>
+    </div>
+
+    <section id="history">
+      <div id="pending-note"></div>
+      <div id="workouts"><p class="muted">Загрузка…</p></div>
+    </section>
+
+    <section id="body" hidden>
+      <div class="card">
+        <div class="small muted">Вес, кг</div>
+        <canvas id="chart" class="chart" aria-label="График веса"></canvas>
+      </div>
+
+      <button class="btn primary wide" id="add-toggle" type="button">+ Добавить замер</button>
+      <form id="m-form" class="card" hidden>
+        <label class="field"><span>Дата</span><input type="date" name="date" required></label>
+        <div class="grid2">
+          <label class="field"><span>Вес, кг *</span><input name="weight" inputmode="decimal" required></label>
+          <label class="field"><span>% жира</span><input name="fat_pct" inputmode="decimal"></label>
+          <label class="field"><span>Мышцы, кг</span><input name="muscle_kg" inputmode="decimal"></label>
+          <label class="field"><span>Осн. обмен, ккал</span><input name="bmr" inputmode="numeric"></label>
+        </div>
+        <div class="form-error" id="m-error"></div>
+        <button class="btn primary wide" type="submit">Сохранить замер</button>
+      </form>
+
+      <h2>История замеров</h2>
+      <div class="card" id="m-list"><p class="muted">Загрузка…</p></div>
+    </section>
+  </main>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/progress.js"></script>
+</body>
+</html>

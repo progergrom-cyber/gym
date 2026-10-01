@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1216">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+  <title>Вход · Тренер</title>
+</head>
+<body class="no-nav">
+  <main>
+    <img class="logo" src="/static/icons/icon-192.png" alt="">
+    <h1 class="center">Тренер для зала</h1>
+    <p class="center muted small">План тренировки из тренажёров нашего клуба</p>
+
+    <div class="seg tabs" id="tabs" style="margin-top:20px">
+      <button type="button" data-mode="login" class="on">Вход</button>
+      <button type="button" data-mode="register">Регистрация</button>
+    </div>
+
+    <form id="form">
+      <label class="field"><span>Логин</span>
+        <input name="username" autocomplete="username" autocapitalize="none" required></label>
+      <label class="field"><span>Пароль</span>
+        <input name="password" type="password" autocomplete="current-password" required minlength="6"></label>
+      <label class="field" id="invite-field" hidden><span>Инвайт-код (спросите у друга)</span>
+        <input name="invite" autocapitalize="characters" autocomplete="off" placeholder="ABCD-EFGH"></label>
+      <div class="form-error" id="error"></div>
+      <button class="btn primary big" type="submit" id="submit">Войти</button>
+    </form>
+  </main>
+
+  <script src="/static/common.js"></script>
+  <script>
+    'use strict';
+    let mode = 'login';
+    const form = $('#form');
+
+    $('#tabs').addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      mode = b.dataset.mode;
+      document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+      $('#invite-field').hidden = mode !== 'register';
+      form.invite.required = mode === 'register';
+      form.password.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+      $('#submit').textContent = mode === 'register' ? 'Зарегистрироваться' : 'Войти';
+      $('#error').textContent = '';
+    });
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      $('#error').textContent = '';
+      $('#submit').disabled = true;
+      try {
+        const data = { username: form.username.value, password: form.password.value };
+        if (mode === 'register') data.invite = form.invite.value;
+        await api('POST', mode === 'register' ? '/api/register' : '/api/login', data);
+        store.del('me');
+        location.href = '/';
+      } catch (err) {
+        $('#error').textContent = err.message;
+        $('#submit').disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

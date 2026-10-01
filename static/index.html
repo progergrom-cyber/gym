@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1216">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+  <title>Тренировка</title>
+</head>
+<body>
+  <header class="top">
+    <h1>Тренировка</h1>
+    <span id="net" class="net" hidden>офлайн</span>
+  </header>
+  <main id="app"><p class="muted">Загрузка…</p></main>
+
+  <div id="timer" class="timer" hidden>
+    <div>
+      <div class="small muted">Отдых</div>
+      <div id="timer-left" class="timer-left">0:00</div>
+    </div>
+    <button id="t-plus" class="btn small" type="button">+30 с</button>
+    <button id="t-skip" class="btn small primary" type="button">Готов</button>
+  </div>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/workout.js"></script>
+</body>
+</html>

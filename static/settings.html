@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1216">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+  <title>Профиль</title>
+</head>
+<body>
+  <header class="top">
+    <h1>Профиль</h1>
+    <span id="net" class="net" hidden>офлайн</span>
+  </header>
+  <main>
+    <div class="seg tabs" id="tabs">
+      <button type="button" data-tab="profile" class="on">Мои настройки</button>
+      <button type="button" data-tab="catalog">Тренажёры</button>
+    </div>
+
+    <!-- Профиль -->
+    <section id="profile">
+      <form id="p-form">
+        <label class="field"><span>Рост, см *</span>
+          <input name="height" inputmode="decimal" required></label>
+
+        <h2>Цель</h2>
+        <label class="choice"><input type="radio" name="goal" value="hypertrophy">
+          <span>Набор мышечной массы<small>3 подхода по 8–15 повторов, отдых 1–1,5 мин</small></span></label>
+        <label class="choice"><input type="radio" name="goal" value="strength">
+          <span>Сила<small>4 подхода по 4–6 повторов в базе, отдых 3 мин</small></span></label>
+        <label class="choice"><input type="radio" name="goal" value="maintain">
+          <span>Поддержание формы<small>2–3 подхода по 10–15 повторов, отдых 1 мин</small></span></label>
+
+        <h2>Сколько раз в неделю хожу в зал</h2>
+        <div class="seg" id="freq">
+          <button type="button" data-v="2">2</button>
+          <button type="button" data-v="3">3</button>
+          <button type="button" data-v="4">4</button>
+          <button type="button" data-v="5">5</button>
+        </div>
+
+        <h2>Ограничения и травмы</h2>
+        <p class="small muted" style="margin-top:-4px">Упражнения с нагрузкой на отмеченные зоны
+          не будут попадать в план.</p>
+        <div class="grid2" id="injuries"></div>
+
+        <div class="form-error" id="p-error"></div>
+        <button class="btn primary big" type="submit">Сохранить</button>
+      </form>
+
+      <h2>Аккаунт</h2>
+      <div class="card">
+        <div>Вы вошли как <b id="username"></b></div>
+        <button class="btn ghost danger wide" id="logout" type="button">Выйти</button>
+      </div>
+    </section>
+
+    <!-- Каталог тренажёров -->
+    <section id="catalog" hidden>
+      <p class="small muted">Каталог общий для всех в вашей группе. Выключенные
+        упражнения не попадают в план.</p>
+      <div id="missing"></div>
+      <button class="btn primary wide" id="add-ex" type="button">+ Добавить упражнение</button>
+      <div id="ex-list"><p class="muted">Загрузка…</p></div>
+    </section>
+  </main>
+
+  <dialog id="ex-dialog">
+    <form id="ex-form" method="dialog">
+      <h3 id="ex-title">Упражнение</h3>
+      <label class="field"><span>Название *</span><input name="name" required maxlength="120"></label>
+      <label class="field"><span>Тренажёр / оборудование</span>
+        <input name="equipment" maxlength="80" placeholder="Technogym, гантели…"></label>
+      <label class="field"><span>Основная группа мышц *</span><select name="muscle" required></select></label>
+      <label class="field"><span>Целевые мышцы (подробно)</span><input name="target" maxlength="120"></label>
+      <label class="field"><span>Вспомогательные мышцы</span><input name="helpers" maxlength="120"></label>
+      <label class="field"><span>Тип *</span>
+        <select name="kind">
+          <option value="compound">База (многосуставное)</option>
+          <option value="isolation">Изоляция (односуставное)</option>
+        </select></label>
+      <label class="field"><span>Категория *</span>
+        <select name="region">
+          <option value="upper">Верх</option>
+          <option value="lower">Низ</option>
+          <option value="core">Пресс / поясница</option>
+        </select></label>
+      <div class="field"><span>Нагружает зоны</span><div class="grid2" id="ex-stress"></div></div>
+      <label class="choice"><input type="checkbox" name="active"> Включено</label>
+      <div class="form-error" id="ex-error"></div>
+      <div class="dialog-actions">
+        <button class="btn ghost" type="button" id="ex-cancel">Отмена</button>
+        <button class="btn primary" type="submit">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/settings.js"></script>
+</body>
+</html>
