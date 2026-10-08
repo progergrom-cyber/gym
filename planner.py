@@ -22,6 +22,7 @@ MUSCLES = {
     "calves": ("Икры", False),
     "abs": ("Пресс", False),
     "lower_back": ("Поясница (разгибатели спины)", False),
+    "cardio": ("Кардио (для разминки)", False),
 }
 
 # Что посоветовать добавить, если на группу мышц нет упражнений
@@ -39,6 +40,7 @@ MUSCLE_HINTS = {
     "calves": "подъём на носки",
     "abs": "скручивания на пресс",
     "lower_back": "гиперэкстензия",
+    "cardio": "беговая дорожка, велотренажёр или эллипс",
 }
 
 INJURIES = {
@@ -48,7 +50,7 @@ INJURIES = {
     "elbows": "локти",
 }
 
-KINDS = {"upper": "Верх", "lower": "Низ", "full": "Фулбади"}
+KINDS = {"upper": "Верх", "lower": "Низ", "full": "Фулбади", "glutes": "Жопа"}
 
 GOALS = {
     "hypertrophy": "Набор мышечной массы",
@@ -64,7 +66,13 @@ PRIORITY = {
     "full": ["quads", "chest", "back_lats", "hamstrings", "back_mid",
              "delts_side", "glutes", "calves", "triceps", "biceps",
              "delts_rear", "abs", "lower_back"],
+    # Группа может повторяться: в день ягодиц они идут первыми и чаще
+    "glutes": ["glutes", "glutes", "hamstrings", "glutes", "quads",
+               "lower_back", "abs"],
 }
+
+# Сколько упражнений можно дать на одну группу в тренировке с упором на неё
+FOCUS_LIMITS = {"glutes": {"glutes": 4, "hamstrings": 2, "quads": 1}}
 
 # Без этих групп тренировка считается несбалансированной (для подсказок)
 ESSENTIAL = {
@@ -73,6 +81,7 @@ ESSENTIAL = {
     "lower": ["quads", "hamstrings", "glutes", "calves"],
     "full": ["quads", "hamstrings", "chest", "back_lats", "back_mid",
              "delts_side", "abs"],
+    "glutes": ["glutes", "hamstrings"],
 }
 
 CORE = {"abs", "lower_back"}
@@ -82,6 +91,7 @@ REGIONS = {
     "upper": {"upper", "core"},
     "lower": {"lower", "core"},
     "full": {"upper", "lower", "core"},
+    "glutes": {"lower", "core"},
 }
 
 WARMUP_SEC = 6 * 60       # разминка
@@ -210,22 +220,38 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
                 return e, sec
         return None
 
-    # Проход 1: по одному упражнению на каждую группу мышц.
-    # Проход 2: если осталось время — второе упражнение на крупные группы.
-    for second_pass in (False, True):
-        for muscle in PRIORITY[kind]:
-            limit = 2 if MUSCLES[muscle][1] else 1
-            if per_muscle.get(muscle, 0) >= (limit if second_pass else 1):
-                continue
-            if second_pass and per_muscle.get(muscle, 0) == 0:
-                continue
-            res = pick(muscle, second_pass)
-            if res:
-                ex, sec = res
-                chosen.append(ex)
-                used_ids.add(ex["id"])
-                per_muscle[muscle] = per_muscle.get(muscle, 0) + 1
-                spent += sec
+    def limit_for(muscle):
+        focus = FOCUS_LIMITS.get(kind, {})
+        if muscle in focus:
+            return focus[muscle]
+        return 2 if MUSCLES[muscle][1] else 1
+
+    def add(muscle, second_pass):
+        nonlocal spent
+        res = pick(muscle, second_pass)
+        if not res:
+            return False
+        ex, sec = res
+        chosen.append(ex)
+        used_ids.add(ex["id"])
+        per_muscle[muscle] = per_muscle.get(muscle, 0) + 1
+        spent += sec
+        return True
+
+    # Проход 1: по списку приоритетов (обычно по одному на группу мышц).
+    for muscle in PRIORITY[kind]:
+        n = per_muscle.get(muscle, 0)
+        if n < limit_for(muscle):
+            add(muscle, n > 0)
+    # Следующие проходы: если осталось время — ещё упражнения на крупные
+    # группы (и на главную группу в тренировке с упором), по одному за круг.
+    added = True
+    while added:
+        added = False
+        for muscle in dict.fromkeys(PRIORITY[kind]):
+            n = per_muscle.get(muscle, 0)
+            if 0 < n < limit_for(muscle) and add(muscle, True):
+                added = True
 
     # Порядок: базовые -> изолирующие -> пресс/поясница в конце
     order = {e["id"]: i for i, e in enumerate(chosen)}
@@ -263,9 +289,16 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
                         "проверьте каталог и ограничения.")
     if any(m in per_muscle for m in ("chest",)) and not (
             per_muscle.get("back_lats") or per_muscle.get("back_mid")) \
-            and kind != "lower":
+            and kind in ("upper", "full"):
         warnings.append("В плане есть грудь, но нет спины — "
                         "баланс нарушен. Добавьте упражнение на спину.")
+
+    # Кардио-тренажёр для разминки
+    cardio = [e for e in exercises if e.get("active", True)
+              and e["muscle"] == "cardio" and not risky_zones(e, injuries)]
+    rng.shuffle(cardio)
+    warmup = [{"name": e["name"], "equipment": e.get("equipment", ""),
+               "photo": e.get("photo_url")} for e in cardio]
 
     total = WARMUP_SEC + sum(i["seconds"] for i in items)
     if items and total < budget - 15 * 60:
@@ -276,6 +309,7 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
         "kind_label": KINDS[kind],
         "minutes": minutes,
         "warmup_min": WARMUP_SEC // 60,
+        "warmup": warmup,
         "total_seconds": total,
         "items": items,
         "warnings": warnings,

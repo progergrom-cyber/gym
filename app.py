@@ -298,8 +298,8 @@ def exercise_from_request(data):
         raise ApiError("Выберите группу мышц")
     if data.get("kind") not in ("compound", "isolation"):
         raise ApiError("Выберите тип: база или изоляция")
-    if data.get("region") not in ("upper", "lower", "core"):
-        raise ApiError("Выберите категорию: верх, низ или пресс/поясница")
+    if data.get("region") not in ("upper", "lower", "core", "cardio"):
+        raise ApiError("Выберите категорию: верх, низ, пресс/поясница или кардио")
     return {
         "name": name[:120],
         "equipment": (data.get("equipment") or "").strip()[:80],
@@ -502,6 +502,74 @@ def history():
                     "kind_label": planner.KINDS.get(w["kind"], w["kind"]),
                     "minutes": w["minutes"], "exercises": exercises})
     return jsonify(items=out)
+
+
+@app.get("/api/stats")
+@login_required
+def stats():
+    """Данные для графиков и посещаемости."""
+    conn = get_db()
+    uid = g.user["id"]
+    workouts = conn.execute(
+        """
+        SELECT w.id, w.date, w.kind, COUNT(s.id) AS sets,
+               COALESCE(SUM(s.weight * s.reps), 0) AS volume
+        FROM workouts w LEFT JOIN sets s ON s.workout_id = w.id
+        WHERE w.user_id = ? AND w.status = 'done'
+        GROUP BY w.id ORDER BY w.date, w.id
+        """, (uid,)).fetchall()
+
+    # Лучший подход в каждой тренировке по каждому упражнению
+    rows = conn.execute(
+        """
+        SELECT s.exercise_id, e.name, e.muscle, w.date, s.weight, s.reps
+        FROM sets s JOIN workouts w ON w.id = s.workout_id
+        JOIN exercises e ON e.id = s.exercise_id
+        WHERE w.user_id = ? AND w.status = 'done'
+        ORDER BY w.date, w.id
+        """, (uid,)).fetchall()
+    by_ex = {}
+    for r in rows:
+        ex = by_ex.setdefault(r["exercise_id"], {
+            "id": r["exercise_id"], "name": r["name"], "muscle": r["muscle"],
+            "points": {}})
+        # Оценка максимума на 1 повтор (формула Эпли) — для сравнения подходов
+        e1rm = r["weight"] * (1 + r["reps"] / 30)
+        best = ex["points"].get(r["date"])
+        if best is None or e1rm > best["e1rm"]:
+            ex["points"][r["date"]] = {"date": r["date"], "weight": r["weight"],
+                                       "reps": r["reps"], "e1rm": round(e1rm, 1)}
+    exercises = sorted(
+        ({**ex, "points": list(ex["points"].values())} for ex in by_ex.values()),
+        key=lambda ex: -len(ex["points"]))
+
+    since = (date.today() - timedelta(days=30)).isoformat()
+    muscles = conn.execute(
+        """
+        SELECT e.muscle, COUNT(*) AS sets
+        FROM sets s JOIN workouts w ON w.id = s.workout_id
+        JOIN exercises e ON e.id = s.exercise_id
+        WHERE w.user_id = ? AND w.status = 'done' AND w.date >= ?
+        GROUP BY e.muscle ORDER BY sets DESC
+        """, (uid, since)).fetchall()
+
+    return jsonify(
+        freq=g.user["freq"],
+        workouts=[{"date": w["date"], "kind": w["kind"],
+                   "kind_label": planner.KINDS.get(w["kind"], w["kind"]),
+                   "sets": w["sets"], "volume": round(w["volume"])}
+                  for w in workouts],
+        exercises=exercises,
+        muscles=muscle_rows(muscles),
+    )
+
+
+def muscle_rows(rows):
+    """Все группы мышц (кроме кардио), включая те, где 0 подходов."""
+    counts = {r["muscle"]: r["sets"] for r in rows}
+    out = [{"muscle": m, "label": label, "sets": counts.get(m, 0)}
+           for m, (label, _big) in planner.MUSCLES.items() if m != "cardio"]
+    return sorted(out, key=lambda r: -r["sets"])
 
 
 @app.delete("/api/workouts/<int:wid>")

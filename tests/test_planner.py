@@ -29,7 +29,7 @@ def profile(goal="hypertrophy", freq=3, injuries=()):
 
 
 ALL_COMBOS = list(itertools.product(
-    (30, 45, 60, 90), ("upper", "lower", "full"),
+    (30, 45, 60, 90), ("upper", "lower", "full", "glutes"),
     ("hypertrophy", "strength", "maintain"), (2, 3, 4, 5), (False, True)))
 
 
@@ -59,8 +59,10 @@ class PlanTests(unittest.TestCase):
                               freq=freq, spares=spares):
                 self.assertEqual(len(ids), len(set(ids)), "повтор упражнения")
                 for muscle, n in counts.items():
-                    limit = 2 if planner.MUSCLES[muscle][1] else 1
+                    limit = planner.FOCUS_LIMITS.get(kind, {}).get(
+                        muscle, 2 if planner.MUSCLES[muscle][1] else 1)
                     self.assertLessEqual(n, limit, muscle)
+                    self.assertNotEqual(muscle, "cardio")
 
     def test_second_exercise_only_after_all_muscles_covered(self):
         plan = planner.build_plan(catalog(), profile(), 90, "upper", seed=3)
@@ -121,6 +123,25 @@ class PlanTests(unittest.TestCase):
         for alt in lat["alternatives"]:
             self.assertEqual(alt["muscle"], "back_lats")
             self.assertNotIn(alt["exercise_id"], plan_ids)
+
+    def test_glutes_day(self):
+        for minutes in (30, 45, 60, 90):
+            plan = planner.build_plan(catalog(), profile(), minutes, "glutes",
+                                      seed=10)
+            muscles = [i["muscle"] for i in plan["items"]]
+            with self.subTest(minutes=minutes):
+                self.assertEqual(muscles[0], "glutes")
+                self.assertGreaterEqual(muscles.count("glutes"),
+                                        max(1, len(muscles) // 2))
+                self.assertTrue(set(muscles) <= {"glutes", "hamstrings",
+                                                 "quads", "lower_back", "abs"})
+
+    def test_cardio_only_in_warmup(self):
+        plan = planner.build_plan(catalog(), profile(), 60, "full", seed=11)
+        self.assertTrue(plan["warmup"])
+        cardio = {e["name"] for e in catalog() if e["muscle"] == "cardio"}
+        self.assertTrue({w["name"] for w in plan["warmup"]} <= cardio)
+        self.assertFalse(cardio & {i["name"] for i in plan["items"]})
 
     def test_photo_in_plan(self):
         cat = catalog()

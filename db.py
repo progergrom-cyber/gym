@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 
-from catalog_seed import SEED
+from catalog_seed import SEED, V1_COUNT
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("GYM_DB", os.path.join(BASE_DIR, "gym.db"))
@@ -83,9 +83,23 @@ def init_db(conn):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(exercises)")}
     if "photo" not in cols:
         conn.execute("ALTER TABLE exercises ADD COLUMN photo TEXT")
-    if conn.execute("SELECT COUNT(*) FROM exercises").fetchone()[0] == 0:
-        for e in SEED:
+    # Стартовый каталог. Каждое упражнение из SEED добавляется один раз:
+    # новые версии приложения дополняют каталог, но не возвращают то,
+    # что вы уже переименовали, и не трогают ваши правки.
+    conn.execute("CREATE TABLE IF NOT EXISTS seeded (name TEXT PRIMARY KEY)")
+    seeded = {r[0] for r in conn.execute("SELECT name FROM seeded")}
+    existing = {r[0] for r in conn.execute("SELECT name FROM exercises")}
+    if not seeded and existing:
+        # База от первой версии: её стартовые упражнения уже были добавлены
+        seeded = {e["name"] for e in SEED[:V1_COUNT]}
+        conn.executemany("INSERT INTO seeded (name) VALUES (?)",
+                         [(n,) for n in seeded])
+    for e in SEED:
+        if e["name"] in seeded:
+            continue
+        if e["name"] not in existing:
             save_exercise(conn, e)
+        conn.execute("INSERT INTO seeded (name) VALUES (?)", (e["name"],))
     conn.commit()
 
 

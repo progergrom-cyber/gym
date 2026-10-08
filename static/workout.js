@@ -2,8 +2,11 @@
 // Страница «Тренировка»: составление плана, отметка подходов, таймер отдыха.
 
 const MINUTES = [30, 45, 60, 90];
-const KINDS = { upper: 'Верх', lower: 'Низ', full: 'Фулбади' };
-const KIND_HINTS = { upper: 'грудь, спина, руки', lower: 'ноги и ягодицы', full: 'всё тело' };
+const KINDS = { upper: 'Верх', lower: 'Низ', full: 'Фулбади', glutes: 'Жопа' };
+const KIND_HINTS = {
+  upper: 'грудь, спина, руки', lower: 'ноги целиком',
+  full: 'всё тело', glutes: 'ягодицы и задняя поверхность бедра',
+};
 
 const root = $('#app');
 let me = null;
@@ -45,7 +48,7 @@ function renderSetup(message) {
     </div>
 
     <h2>Что тренируем</h2>
-    <div class="tiles three" id="kind">
+    <div class="tiles two" id="kind">
       ${Object.entries(KINDS).map(([k, label]) => `<button type="button" data-v="${k}"
         class="tile ${k === choice.kind ? 'on' : ''}"><b>${label}</b><small>${KIND_HINTS[k]}</small></button>`).join('')}
     </div>
@@ -137,6 +140,25 @@ function renderItem(item, idx) {
   </article>`;
 }
 
+function renderWarmup() {
+  const options = plan.warmup || [];
+  const w = options[plan.warmup_idx || 0];
+  return `
+    <div class="card warmup">
+      ${w && w.photo ? `<button class="thumb big ex-photo" type="button" data-photo="${esc(w.photo)}"
+        aria-label="Открыть фото"><img src="${esc(w.photo)}" alt="" loading="lazy"></button>` : ''}
+      <div class="grow">
+        <h3>Разминка ~${plan.warmup_min} мин</h3>
+        <div class="small muted" style="margin-top:4px">${w
+          ? `5 минут: <b style="color:var(--text)">${esc(w.name)}</b>${w.equipment ? ' (' + esc(w.equipment) + ')' : ''}, в лёгком темпе.`
+          : '5 минут лёгкого кардио (дорожка, велотренажёр, эллипс).'}
+          Потом вращения в плечах, локтях, коленях. В базовых упражнениях первый подход
+          можно сделать с половиной веса.</div>
+        ${options.length > 1 ? '<button class="btn small ghost" type="button" id="warmup-next" style="margin-top:10px">Другой тренажёр</button>' : ''}
+      </div>
+    </div>`;
+}
+
 function renderPlan() {
   const warnings = plan.warnings || [];
   const total = plan.items.reduce((n, i) => n + i.log.length, 0);
@@ -151,16 +173,18 @@ function renderPlan() {
     </div>
     ${warnings.length ? `<details class="note warn"><summary>Подсказки (${warnings.length})</summary>
       <ul>${warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
-    <div class="card">
-      <h3>Разминка ~${plan.warmup_min} мин</h3>
-      <div class="small muted" style="margin-top:4px">5 минут лёгкого кардио (велотренажёр, эллипс) и вращения в плечах,
-        локтях, коленях. В базовых упражнениях первый подход можно сделать с половиной веса.</div>
-    </div>
+    ${renderWarmup()}
     ${plan.items.map(renderItem).join('')}
     ${plan.items.length ? '' : '<div class="note warn">В плане нет упражнений.</div>'}
     <button class="btn primary big" id="finish" type="button">Завершить тренировку</button>
     <button class="btn ghost wide" id="cancel" type="button">Отменить план</button>`;
   $('#finish').addEventListener('click', finishWorkout);
+  const wn = $('#warmup-next');
+  if (wn) wn.addEventListener('click', () => {
+    plan.warmup_idx = ((plan.warmup_idx || 0) + 1) % plan.warmup.length;
+    save();
+    renderPlan();
+  });
   $('#cancel').addEventListener('click', cancelPlan);
   keepScreenOn();
 }
@@ -179,6 +203,8 @@ root.addEventListener('input', e => {
 
 root.addEventListener('click', e => {
   if (!plan) return;
+  const warmPhoto = e.target.closest('.warmup .ex-photo');
+  if (warmPhoto) { showPhoto(warmPhoto.dataset.photo); return; }
   const card = e.target.closest('.ex');
   if (!card) return;
   const idx = Number(card.dataset.i);

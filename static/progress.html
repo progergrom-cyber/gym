@@ -16,19 +16,70 @@
     <span id="net" class="net" hidden>офлайн</span>
   </header>
   <main>
-    <div class="seg tabs" id="tabs">
-      <button type="button" data-tab="history" class="on">Тренировки</button>
-      <button type="button" data-tab="body">Замеры тела</button>
+    <div class="seg tabs four" id="tabs">
+      <button type="button" data-tab="charts" class="on">Графики</button>
+      <button type="button" data-tab="visits">Посещения</button>
+      <button type="button" data-tab="history">История</button>
+      <button type="button" data-tab="body">Тело</button>
     </div>
 
-    <section id="history">
+    <!-- Графики -->
+    <section id="charts">
+      <div class="stats" id="charts-stats"></div>
+
+      <div class="card">
+        <h3>Тоннаж по неделям</h3>
+        <div class="small muted">Сколько килограммов вы подняли за неделю: вес × повторы во всех подходах</div>
+        <div id="volume-chart"></div>
+      </div>
+
+      <div class="card">
+        <h3>Рабочий вес в упражнении</h3>
+        <div class="small muted">Лучший подход в каждой тренировке. Нажмите на точку, чтобы увидеть подробности</div>
+        <label class="field"><span>Упражнение</span><select id="ex-select"></select></label>
+        <div class="chart-caption" id="ex-caption"></div>
+        <canvas id="ex-chart" class="chart" aria-label="График рабочего веса"></canvas>
+      </div>
+
+      <div class="card">
+        <h3>Баланс мышц за 30 дней</h3>
+        <div class="small muted">Сколько подходов досталось каждой группе мышц</div>
+        <div id="muscle-bars"></div>
+      </div>
+    </section>
+
+    <!-- Посещения -->
+    <section id="visits" hidden>
+      <div class="stats" id="visit-stats"></div>
+
+      <div class="card">
+        <div class="cal-head">
+          <button class="icon-btn" type="button" id="cal-prev" aria-label="Предыдущий месяц">‹</button>
+          <h3 id="cal-title"></h3>
+          <button class="icon-btn" type="button" id="cal-next" aria-label="Следующий месяц">›</button>
+        </div>
+        <div class="cal" id="cal"></div>
+        <div class="small muted" id="cal-legend" style="margin-top:10px"></div>
+      </div>
+
+      <div class="card">
+        <h3>Посещения по неделям</h3>
+        <div class="small muted">Пунктир — ваша цель из профиля</div>
+        <div id="visits-chart"></div>
+      </div>
+    </section>
+
+    <!-- История -->
+    <section id="history" hidden>
       <div id="pending-note"></div>
       <div id="workouts"><p class="muted">Загрузка…</p></div>
     </section>
 
+    <!-- Тело -->
     <section id="body" hidden>
       <div class="card">
-        <div class="small muted">Вес, кг</div>
+        <h3>Вес, кг</h3>
+        <div class="chart-caption" id="w-caption"></div>
         <canvas id="chart" class="chart" aria-label="График веса"></canvas>
       </div>
 

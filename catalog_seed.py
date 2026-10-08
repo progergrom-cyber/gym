@@ -4,7 +4,7 @@ muscle  — основная группа мышц (ключ из planner.MUSCLE
 target  — какие мышцы работают (текст для человека)
 helpers — вспомогательные мышцы (текст)
 kind    — compound (база) / isolation (изоляция)
-region  — upper (верх) / lower (низ) / core (пресс, поясница)
+region  — upper (верх) / lower (низ) / core (пресс, поясница) / cardio
 stress  — какие зоны нагружает: knees, lower_back, shoulders, elbows
 active  — включено ли упражнение
 """
@@ -71,4 +71,82 @@ SEED = [
     dict(name="Отведение бедра в тренажёре", equipment="Тренажёр",
          muscle="glutes", target="средняя ягодичная", helpers="",
          kind="isolation", region="lower", stress=[], active=False),
+
+    # --- Добавлено в следующих версиях (из приложения DDX) ---
+    # Кардио — для разминки
+    dict(name="Шаг и бег на дорожке", equipment="Technogym", muscle="cardio",
+         target="сердце, выносливость", helpers="ноги", kind="isolation",
+         region="cardio", stress=[], active=True),
+    dict(name="Работа на велотренажёре Air Bike", equipment="Assault Fitness",
+         muscle="cardio", target="сердце, выносливость", helpers="ноги, руки",
+         kind="isolation", region="cardio", stress=[], active=True),
+    dict(name="Работа на велотренажёре", equipment="Technogym", muscle="cardio",
+         target="сердце, выносливость", helpers="ноги", kind="isolation",
+         region="cardio", stress=[], active=True),
+    dict(name="Ходьба на эллипсоиде", equipment="Technogym", muscle="cardio",
+         target="сердце, выносливость", helpers="ноги, руки", kind="isolation",
+         region="cardio", stress=[], active=True),
+
+    # Ягодицы
+    dict(name="Отведение бёдер сидя", equipment="Foreman", muscle="glutes",
+         target="средняя и малая ягодичная", helpers="", kind="isolation",
+         region="lower", stress=[], active=True),
+    dict(name="Кроссовер: отведение бедра — стоя", equipment="Technogym",
+         muscle="glutes", target="средняя ягодичная", helpers="",
+         kind="isolation", region="lower", stress=[], active=True),
+    dict(name="Кроссовер: разгибание бедра — стоя", equipment="Technogym",
+         muscle="glutes", target="большая ягодичная",
+         helpers="задняя поверхность бедра", kind="isolation", region="lower",
+         stress=[], active=True),
+    dict(name="Ягодичный мост", equipment="Technogym (тренажёр)",
+         muscle="glutes", target="большая ягодичная",
+         helpers="задняя поверхность бедра", kind="compound", region="lower",
+         stress=[], active=True),
+    dict(name="Экстензия — с акцентом на ягодицы", equipment="Foreman",
+         muscle="glutes", target="большая ягодичная",
+         helpers="задняя поверхность бедра, разгибатели спины",
+         kind="isolation", region="lower", stress=["lower_back"], active=True),
+    dict(name="Болгарские выпады с акцентом на ягодицы", equipment="Foreman",
+         muscle="glutes", target="большая ягодичная",
+         helpers="квадрицепс, задняя поверхность бедра", kind="compound",
+         region="lower", stress=["knees"], active=True),
+    dict(name="Выпады с гантелями — с акцентом на ягодицы",
+         equipment="Гантели", muscle="glutes", target="большая ягодичная",
+         helpers="квадрицепс", kind="compound", region="lower",
+         stress=["knees"], active=True),
+    dict(name="Обратный присед — с упором", equipment="Panatta",
+         muscle="glutes", target="большая ягодичная",
+         helpers="квадрицепс", kind="compound", region="lower",
+         stress=["knees"], active=True),
+
+    # Задняя поверхность бедра
+    dict(name="Румынская тяга в тренажёре", equipment="Foreman",
+         muscle="hamstrings", target="задняя поверхность бедра",
+         helpers="ягодицы, разгибатели спины", kind="compound",
+         region="lower", stress=["lower_back"], active=True),
+    dict(name="Румынская становая тяга в тренажёре Смита", equipment="Foreman",
+         muscle="hamstrings", target="задняя поверхность бедра",
+         helpers="ягодицы, разгибатели спины", kind="compound",
+         region="lower", stress=["lower_back"], active=True),
+
+    # Квадрицепс
+    dict(name="Смит: выпады", equipment="Technogym", muscle="quads",
+         target="квадрицепс, ягодицы", helpers="задняя поверхность бедра",
+         kind="compound", region="lower", stress=["knees"], active=True),
+    dict(name="Смит: присед", equipment="Technogym", muscle="quads",
+         target="квадрицепс", helpers="ягодицы, разгибатели спины",
+         kind="compound", region="lower", stress=["knees", "lower_back"],
+         active=True),
+    dict(name="Жим ногами (Matrix)", equipment="Matrix", muscle="quads",
+         target="квадрицепс", helpers="ягодицы, задняя поверхность бедра",
+         kind="compound", region="lower", stress=["knees"], active=True),
+
+    # Поясница
+    dict(name="Экстензия — с акцентом на спину", equipment="Foreman",
+         muscle="lower_back", target="разгибатели спины",
+         helpers="ягодицы, задняя поверхность бедра", kind="isolation",
+         region="core", stress=["lower_back"], active=True),
 ]
+
+# Сколько упражнений было в самой первой версии каталога (для обновления базы)
+V1_COUNT = 18
