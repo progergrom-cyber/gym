@@ -1,6 +1,8 @@
 'use strict';
 // Service worker: сохраняет приложение в телефоне, чтобы оно открывалось без интернета.
-const VERSION = 'v3';
+// При каждом обновлении приложения номер версии увеличивается — здесь и в
+// адресах файлов в .html (?v=...), чтобы телефоны точно скачали новые файлы.
+const VERSION = 'v4';
 const STATIC_CACHE = 'gym-static-' + VERSION;
 const API_CACHE = 'gym-api';
 
@@ -14,7 +16,10 @@ const PRECACHE = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then(cache => cache.addAll(PRECACHE)).then(() => self.skipWaiting())
+    caches.open(STATIC_CACHE)
+      // cache: 'reload' — брать файлы с сервера, а не из кэша браузера
+      .then(cache => cache.addAll(PRECACHE.map(url => new Request(url, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -30,7 +35,8 @@ self.addEventListener('activate', event => {
 // Если связи нет или она слишком медленная — показываем сохранённую копию.
 async function networkFirst(request, cacheName, waitMs) {
   const cache = await caches.open(cacheName);
-  const network = fetch(request).then(resp => {
+  // cache: 'no-cache' — всегда сверяться с сервером, не верить старой копии браузера
+  const network = fetch(request, { cache: 'no-cache' }).then(resp => {
     if (resp.ok) cache.put(request, resp.clone());
     return resp;
   });
