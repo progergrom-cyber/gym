@@ -120,6 +120,12 @@ function renderItem(item, idx) {
         <span>${item.kind === 'compound' ? 'база' : 'изоляция'}</span>
       </div>
       <div class="hint">${esc(item.hint)}</div>
+      ${renderNote(item)}
+      ${item.tips && item.tips.length ? `
+        <details class="tips" ${item.tipsOpen ? 'open' : ''}>
+          <summary>Как делать</summary>
+          <ul>${item.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+        </details>` : ''}
       <div class="sets">
         <div class="set-head"><span>#</span><span>Вес, кг</span><span>Повторы</span><span></span></div>
         ${item.log.map((s, j) => `
@@ -135,9 +141,30 @@ function renderItem(item, idx) {
       <div class="ex-actions">
         <button class="btn small ghost add-set" type="button">+ подход</button>
         ${started ? '' : '<button class="btn small ghost replace" type="button">Заменить</button>'}
+        ${item.noteOpen || noteOf(item) ? '' : '<button class="btn small ghost edit-note" type="button">📝 Заметка</button>'}
+        <button class="btn small ghost danger remove" type="button">Убрать</button>
       </div>
     </div>
   </article>`;
+}
+
+// Заметка к упражнению («сиденье на 4»). Хранится за упражнением и
+// покажется в следующий раз. Изменения уходят на сервер вместе с тренировкой.
+function noteOf(item) {
+  const changed = plan.notes || {};
+  return item.exercise_id in changed ? changed[item.exercise_id] : (item.note || '');
+}
+
+function renderNote(item) {
+  const note = noteOf(item);
+  if (item.noteOpen) {
+    return `<div class="note-edit">
+      <textarea class="ex-note" rows="2" maxlength="300"
+        placeholder="Например: сиденье на 4, спинка на 2">${esc(note)}</textarea>
+      <button class="btn small primary note-done" type="button">Готово</button>
+    </div>`;
+  }
+  return note ? `<button class="ex-note-view edit-note" type="button">📝 ${esc(note)}</button>` : '';
 }
 
 function renderWarmup() {
@@ -176,6 +203,7 @@ function renderPlan() {
     ${renderWarmup()}
     ${plan.items.map(renderItem).join('')}
     ${plan.items.length ? '' : '<div class="note warn">В плане нет упражнений.</div>'}
+    <button class="btn ghost wide" id="add-ex" type="button">＋ Добавить упражнение</button>
     <button class="btn primary big" id="finish" type="button">Завершить тренировку</button>
     <button class="btn ghost wide" id="cancel" type="button">Отменить план</button>`;
   $('#finish').addEventListener('click', finishWorkout);
@@ -186,12 +214,20 @@ function renderPlan() {
     renderPlan();
   });
   $('#cancel').addEventListener('click', cancelPlan);
+  $('#add-ex').addEventListener('click', openAddDialog);
   keepScreenOn();
 }
 
 // Ввод веса и повторов — сохраняем сразу, чтобы ничего не потерялось
 root.addEventListener('input', e => {
   if (!plan) return;
+  if (e.target.classList.contains('ex-note')) {
+    const item = plan.items[e.target.closest('.ex').dataset.i];
+    plan.notes = plan.notes || {};
+    plan.notes[item.exercise_id] = e.target.value;
+    save();
+    return;
+  }
   const card = e.target.closest('.ex');
   const row = e.target.closest('.set');
   if (!card || !row) return;
@@ -224,8 +260,108 @@ root.addEventListener('click', e => {
     renderPlan();
   } else if (e.target.closest('.replace')) {
     replaceExercise(idx);
+  } else if (e.target.closest('.edit-note')) {
+    item.noteOpen = true;
+    save();
+    renderPlan();
+    const ta = $(`.ex[data-i="${idx}"] .ex-note`);
+    if (ta) ta.focus();
+  } else if (e.target.closest('.note-done')) {
+    item.noteOpen = false;
+    save();
+    renderPlan();
+  } else if (e.target.closest('.remove')) {
+    removeExercise(idx);
   }
 });
+
+// Запоминаем, раскрыт ли блок «Как делать» (чтобы не закрывался при отметке подхода)
+root.addEventListener('toggle', e => {
+  if (!plan || !e.target.classList || !e.target.classList.contains('tips')) return;
+  const item = plan.items[e.target.closest('.ex').dataset.i];
+  item.tipsOpen = e.target.open;
+  save();
+}, true);
+
+function removeExercise(idx) {
+  const item = plan.items[idx];
+  const started = item.log.some(x => x.done);
+  if (started && !confirm(`Убрать «${item.name}»? Отмеченные подходы этого упражнения не сохранятся.`)) return;
+  plan.items.splice(idx, 1);
+  save();
+  renderPlan();
+  toast('Убрано: ' + item.name);
+}
+
+// ---------- добавить упражнение в план вручную ----------
+
+function openAddDialog() {
+  const pool = plan.pool;
+  if (!pool) {
+    toast('Этот план составлен старой версией. Составьте план заново, чтобы добавлять упражнения.', 5000);
+    return;
+  }
+  let dlg = $('#add-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'add-dialog';
+    dlg.innerHTML = `<div class="dialog-body">
+        <h3>Добавить упражнение</h3>
+        <input class="search" type="search" placeholder="Поиск по названию" aria-label="Поиск">
+        <div class="add-list"></div>
+        <button class="btn ghost wide close-add" type="button">Закрыть</button>
+      </div>`;
+    document.body.appendChild(dlg);
+    dlg.querySelector('.close-add').addEventListener('click', () => dlg.close());
+    dlg.querySelector('.search').addEventListener('input', () => fillAddList(dlg));
+    dlg.querySelector('.add-list').addEventListener('click', e => {
+      const b = e.target.closest('[data-id]');
+      if (!b) return;
+      addExercise(Number(b.dataset.id));
+      dlg.close();
+    });
+  }
+  dlg.querySelector('.search').value = '';
+  fillAddList(dlg);
+  dlg.showModal();
+}
+
+function fillAddList(dlg) {
+  const q = dlg.querySelector('.search').value.trim().toLowerCase();
+  const inPlan = new Set(plan.items.map(i => i.exercise_id));
+  const list = plan.pool.filter(i => !inPlan.has(i.exercise_id) &&
+    (!q || i.name.toLowerCase().includes(q) || i.muscle_label.toLowerCase().includes(q)));
+  let html = '';
+  let group = null;
+  for (const i of list) {
+    if (i.muscle_label !== group) {
+      group = i.muscle_label;
+      html += `<h2>${esc(group)}</h2>`;
+    }
+    html += `<button class="add-row" type="button" data-id="${i.exercise_id}">
+      <span class="thumb">${i.photo ? `<img src="${esc(i.photo)}" alt="" loading="lazy">` : DUMBBELL_SVG}</span>
+      <span class="grow">${esc(i.name)}
+        <small>${esc(i.equipment || '—')} · ${i.sets} × ${i.rep_lo}–${i.rep_hi}${
+          i.risky && i.risky.length ? ' · ⚠ ' + i.risky.map(z => INJURY_LABELS[z]).join(', ') : ''}</small>
+      </span>
+    </button>`;
+  }
+  dlg.querySelector('.add-list').innerHTML = html || '<p class="muted">Ничего не найдено</p>';
+}
+
+function addExercise(id) {
+  const src = plan.pool.find(i => i.exercise_id === id);
+  if (!src) return;
+  const item = JSON.parse(JSON.stringify(src));
+  item.alternatives = [];
+  initLog(item);
+  plan.items.push(item);
+  save();
+  renderPlan();
+  const cards = document.querySelectorAll('.ex');
+  cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  toast('Добавлено: ' + item.name);
+}
 
 function toggleSet(item, j, row) {
   const s = item.log[j];
@@ -291,7 +427,10 @@ async function finishWorkout() {
   const queue = store.get('pending', []);
   queue.push({
     workout_id: plan.workout_id,
-    payload: { date: plan.date, kind: plan.kind, minutes: plan.minutes, sets },
+    payload: {
+      date: plan.date, kind: plan.kind, minutes: plan.minutes, sets,
+      notes: plan.notes || {},
+    },
   });
   store.set('pending', queue);
   clearPlan(true);

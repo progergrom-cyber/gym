@@ -2,14 +2,14 @@
 // Service worker: сохраняет приложение в телефоне, чтобы оно открывалось без интернета.
 // При каждом обновлении приложения номер версии увеличивается — здесь и в
 // адресах файлов в .html (?v=...), чтобы телефоны точно скачали новые файлы.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const STATIC_CACHE = 'gym-static-' + VERSION;
 const API_CACHE = 'gym-api';
 
 const PRECACHE = [
-  '/', '/progress', '/settings', '/login',
+  '/', '/progress', '/settings', '/login', '/friends',
   '/static/style.css', '/static/common.js', '/static/workout.js',
-  '/static/progress.js', '/static/settings.js',
+  '/static/progress.js', '/static/settings.js', '/static/friends.js',
   '/static/icons/icon-192.png', '/static/icons/icon-512.png',
   '/manifest.json',
 ];

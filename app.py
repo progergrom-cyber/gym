@@ -128,13 +128,15 @@ def profile_dict(user):
         "goal": user["goal"],
         "freq": user["freq"],
         "injuries": json.loads(user["injuries"] or "[]"),
+        "share": None if user["share"] is None else bool(user["share"]),
     }
 
 
 # ---------- страницы ----------
 
 PAGES = {"/": "index.html", "/progress": "progress.html",
-         "/settings": "settings.html", "/login": "login.html"}
+         "/settings": "settings.html", "/login": "login.html",
+         "/friends": "friends.html"}
 
 
 def make_page_view(filename):
@@ -311,6 +313,9 @@ def exercise_from_request(data):
         "stress": [s for s in data.get("stress") or []
                    if s in planner.INJURIES],
         "active": bool(data.get("active", True)),
+        "tips": "\n".join(line.strip() for line in
+                          str(data.get("tips") or "").splitlines()
+                          if line.strip())[:2000],
     }
 
 
@@ -423,7 +428,8 @@ def make_plan():
     plan = planner.build_plan(
         db.all_exercises(conn), profile, minutes, kind,
         recent_ids=db.recent_exercise_ids(conn, uid),
-        history=db.last_sets(conn, uid))
+        history=db.last_sets(conn, uid),
+        notes=db.user_notes(conn, uid))
     # Незавершённые старые планы больше не нужны
     conn.execute("DELETE FROM workouts WHERE user_id=? AND status='planned'",
                  (uid,))
@@ -466,6 +472,15 @@ def finish_workout(wid):
             continue
         if ex_id in known and 0 < reps <= 200 and 0 <= weight <= 1000:
             rows.append((wid, ex_id, set_no, weight, reps))
+    notes = {}
+    for ex_id, note in (data.get("notes") or {}).items():
+        try:
+            ex_id = int(ex_id)
+        except ValueError:
+            continue
+        if ex_id in known and isinstance(note, str):
+            notes[ex_id] = note
+    db.save_notes(conn, uid, notes)
     conn.execute("DELETE FROM sets WHERE workout_id=?", (wid,))
     conn.executemany("INSERT INTO sets (workout_id, exercise_id, set_no, "
                      "weight, reps) VALUES (?,?,?,?,?)", rows)
@@ -570,6 +585,135 @@ def muscle_rows(rows):
     out = [{"muscle": m, "label": label, "sets": counts.get(m, 0)}
            for m, (label, _big) in planner.MUSCLES.items() if m != "cardio"]
     return sorted(out, key=lambda r: -r["sets"])
+
+
+ACHIEVEMENTS = [
+    # (значок, название, описание, что считаем, сколько нужно)
+    ("🏁", "Первый шаг", "Первая тренировка", "workouts", 1),
+    ("💪", "Втянулся", "10 тренировок", "workouts", 10),
+    ("🔥", "Завсегдатай", "25 тренировок", "workouts", 25),
+    ("🏆", "Полсотни", "50 тренировок", "workouts", 50),
+    ("💯", "Сотка", "100 тренировок", "workouts", 100),
+    ("📅", "Режим", "2 недели подряд с выполненной целью", "streak", 2),
+    ("🗓", "Месяц без пропусков", "4 недели подряд с целью", "streak", 4),
+    ("⚙️", "Машина", "8 недель подряд с целью", "streak", 8),
+    ("⭐", "Первый рекорд", "Побить свой лучший вес", "records", 1),
+    ("🌟", "Рекордсмен", "10 личных рекордов", "records", 10),
+    ("🏋️", "10 тонн", "Поднять в сумме 10 000 кг", "volume", 10000),
+    ("🚛", "50 тонн", "Поднять в сумме 50 000 кг", "volume", 50000),
+    ("🍑", "Железная попа", "10 тренировок «Жопа»", "glutes", 10),
+]
+
+
+def best_week_streak(dates, goal):
+    """Самая длинная серия недель подряд, где посещений не меньше цели."""
+    weeks = {}
+    for d in set(dates):
+        day = date.fromisoformat(d)
+        monday = day - timedelta(days=day.weekday())
+        weeks[monday] = weeks.get(monday, 0) + 1
+    good = sorted(m for m, n in weeks.items() if n >= goal)
+    best = run = 0
+    prev = None
+    for m in good:
+        run = run + 1 if prev and (m - prev).days == 7 else 1
+        best = max(best, run)
+        prev = m
+    return best
+
+
+@app.get("/api/friends")
+@login_required
+def friends():
+    conn = get_db()
+    uid = g.user["id"]
+    users = {r["id"]: r for r in conn.execute(
+        "SELECT id, username, share FROM users")}
+    sharing = {i for i, u in users.items() if u["share"] == 1}
+    rows = conn.execute(
+        """
+        SELECT w.id AS wid, w.user_id, w.date, w.kind,
+               s.exercise_id, e.name, s.weight, s.reps
+        FROM workouts w JOIN sets s ON s.workout_id = w.id
+        JOIN exercises e ON e.id = s.exercise_id
+        WHERE w.status = 'done' AND (w.user_id = ? OR w.user_id IN (
+            SELECT id FROM users WHERE share = 1))
+        ORDER BY w.date, w.id, s.id
+        """, (uid,)).fetchall()
+
+    workouts = {}
+    for r in rows:
+        w = workouts.setdefault(r["wid"], {
+            "user_id": r["user_id"], "date": r["date"], "kind": r["kind"],
+            "sets": 0, "volume": 0.0, "max": {}})
+        w["sets"] += 1
+        w["volume"] += r["weight"] * r["reps"]
+        key = (r["exercise_id"], r["name"])
+        w["max"][key] = max(w["max"].get(key, 0), r["weight"])
+
+    # Рекорды: лучший вес в упражнении выше, чем во всех прошлых тренировках
+    best = {}
+    for w in workouts.values():          # уже по порядку дат
+        w["records"] = []
+        for (ex_id, name), top in w["max"].items():
+            key = (w["user_id"], ex_id)
+            prev = best.get(key)
+            if prev is not None and top > prev["weight"]:
+                w["records"].append({"name": name, "weight": top,
+                                     "prev": prev["weight"]})
+            if prev is None or top > prev["weight"]:
+                best[key] = {"name": name, "weight": top, "date": w["date"]}
+
+    def summary(wid, w):
+        return {"id": wid, "username": users[w["user_id"]]["username"],
+                "me": w["user_id"] == uid, "date": w["date"],
+                "kind_label": planner.KINDS.get(w["kind"], w["kind"]),
+                "exercises": len(w["max"]), "sets": w["sets"],
+                "volume": round(w["volume"]), "records": w["records"]}
+
+    feed = [summary(wid, w) for wid, w in reversed(workouts.items())
+            if w["user_id"] in sharing][:40]
+
+    month = date.today().isoformat()[:7]
+    board = []
+    for u in sorted(sharing):
+        mine = [w for w in workouts.values()
+                if w["user_id"] == u and w["date"].startswith(month)]
+        board.append({"username": users[u]["username"], "me": u == uid,
+                      "visits": len({w["date"] for w in mine}),
+                      "workouts": len(mine),
+                      "volume": round(sum(w["volume"] for w in mine))})
+    board.sort(key=lambda b: (-b["visits"], -b["volume"]))
+
+    mine = [w for w in workouts.values() if w["user_id"] == uid]
+    values = {
+        "workouts": len(mine),
+        "streak": best_week_streak([w["date"] for w in mine], g.user["freq"]),
+        "records": sum(len(w["records"]) for w in mine),
+        "volume": round(sum(w["volume"] for w in mine)),
+        "glutes": sum(1 for w in mine if w["kind"] == "glutes"),
+    }
+    achievements = [{"icon": icon, "title": title, "desc": desc,
+                     "value": min(values[what], need), "need": need,
+                     "done": values[what] >= need}
+                    for icon, title, desc, what, need in ACHIEVEMENTS]
+    records = sorted((b for (u, _ex), b in best.items() if u == uid),
+                     key=lambda b: b["name"])
+
+    return jsonify(share=profile_dict(g.user)["share"], feed=feed,
+                   board=board, month=month, achievements=achievements,
+                   records=records)
+
+
+@app.put("/api/friends/share")
+@login_required
+def set_share():
+    share = bool(body().get("share"))
+    conn = get_db()
+    conn.execute("UPDATE users SET share=? WHERE id=?",
+                 (1 if share else 0, g.user["id"]))
+    conn.commit()
+    return jsonify(ok=True, share=share)
 
 
 @app.delete("/api/workouts/<int:wid>")

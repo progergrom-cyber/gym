@@ -151,14 +151,14 @@ $('#ex-stress').innerHTML = injuryBoxes('stress');
 function openEditor(id) {
   editingId = id;
   const ex = id ? catalog.items.find(x => x.id === id) : {
-    name: '', equipment: '', muscle: '', target: '', helpers: '',
+    name: '', equipment: '', muscle: '', target: '', helpers: '', tips: '',
     kind: 'isolation', region: 'upper', stress: [], active: true,
   };
   $('#ex-title').textContent = id ? 'Изменить упражнение' : 'Новое упражнение';
   fields.muscle.innerHTML = '<option value="">— выберите —</option>' +
     Object.entries(catalog.muscles).map(([k, label]) =>
       `<option value="${k}">${esc(label)}</option>`).join('');
-  for (const f of ['name', 'equipment', 'muscle', 'target', 'helpers', 'kind', 'region']) {
+  for (const f of ['name', 'equipment', 'muscle', 'target', 'helpers', 'kind', 'region', 'tips']) {
     fields[f].value = ex[f] || '';
   }
   fields.active.checked = ex.active;
@@ -247,7 +247,7 @@ exForm.addEventListener('submit', async e => {
   const data = {
     name: f.name.value, equipment: f.equipment.value, muscle: f.muscle.value,
     target: f.target.value, helpers: f.helpers.value, kind: f.kind.value,
-    region: f.region.value, active: f.active.checked,
+    region: f.region.value, active: f.active.checked, tips: f.tips.value,
     stress: [...exForm.querySelectorAll('[name=stress]:checked')].map(c => c.value),
   };
   try {

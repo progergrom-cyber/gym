@@ -134,7 +134,7 @@ def risky_zones(ex, injuries):
     return [z for z in ex.get("stress", []) if z in injuries]
 
 
-def _item(ex, profile, minutes, history, extra_sets=0):
+def _item(ex, profile, minutes, history, extra_sets=0, notes=None):
     p = prescribe(ex, profile["goal"], profile["freq"], minutes)
     p["sets"] += extra_sets
     hint = suggest(ex, history.get(ex["id"]), p["rep_lo"], p["rep_hi"])
@@ -153,6 +153,9 @@ def _item(ex, profile, minutes, history, extra_sets=0):
         "seconds": exercise_seconds(p),
         "weight": hint["weight"],
         "hint": hint["text"],
+        "tips": [t for t in (ex.get("tips") or "").split("\n") if t.strip()],
+        "note": (notes or {}).get(ex["id"], ""),
+        "risky": risky_zones(ex, profile.get("injuries") or []),
     }
 
 
@@ -165,14 +168,15 @@ def find_gaps(exercises, kind, injuries=()):
 
 
 def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
-               seed=None):
+               seed=None, notes=None):
     """Составить план.
 
     exercises  — список словарей каталога (id, name, muscle, kind, region,
                  stress, active, equipment);
     profile    — {"goal", "freq", "injuries"};
     recent_ids — id упражнений из прошлых тренировок (для разнообразия);
-    history    — {exercise_id: [(вес, повторы), ...]} последнего выполнения.
+    history    — {exercise_id: [(вес, повторы), ...]} последнего выполнения;
+    notes      — {exercise_id: личная заметка}.
     """
     rng = random.Random(seed)
     history = history or {}
@@ -270,12 +274,13 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
 
     items = []
     for ex in chosen:
-        item = _item(ex, profile, minutes, history, extra.get(ex["id"], 0))
+        item = _item(ex, profile, minutes, history, extra.get(ex["id"], 0),
+                     notes)
         alts = [a for a in safe if a["muscle"] == ex["muscle"]
                 and a["id"] not in used_ids]
         alts.sort(key=lambda a: (a["id"] in recent, lots[a["id"]]))
         item["alternatives"] = [
-            _item(a, profile, minutes, history, extra.get(ex["id"], 0))
+            _item(a, profile, minutes, history, extra.get(ex["id"], 0), notes)
             for a in alts]
         items.append(item)
 
@@ -304,6 +309,13 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
     if items and total < budget - 15 * 60:
         warnings.append(f"План занимает около {round(total / 60)} мин из "
                         f"{minutes}: в каталоге мало подходящих упражнений.")
+    # Все включённые силовые упражнения — чтобы добавить в план вручную
+    # (работает и без интернета). Порядок — как в списке групп мышц.
+    order_m = list(MUSCLES)
+    pool = sorted((e for e in exercises if e.get("active", True)
+                   and e["muscle"] in MUSCLES and e["muscle"] != "cardio"),
+                  key=lambda e: (order_m.index(e["muscle"]), e["name"]))
+
     return {
         "kind": kind,
         "kind_label": KINDS[kind],
@@ -314,4 +326,5 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
         "items": items,
         "warnings": warnings,
         "gaps": gaps,
+        "pool": [_item(e, profile, minutes, history, 0, notes) for e in pool],
     }

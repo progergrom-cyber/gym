@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0c0f">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css?v=5">
+  <title>Компания</title>
+</head>
+<body>
+  <header class="top">
+    <div><span class="eyebrow">Вместе веселее</span><h1>Компания</h1></div>
+    <span id="net" class="net" hidden>офлайн</span>
+  </header>
+  <main>
+    <div id="consent"></div>
+
+    <div class="seg tabs" id="tabs">
+      <button type="button" data-tab="feed" class="on">Лента</button>
+      <button type="button" data-tab="board">Рейтинг</button>
+      <button type="button" data-tab="awards">Достижения</button>
+    </div>
+
+    <section id="feed"><p class="muted">Загрузка…</p></section>
+
+    <section id="board" hidden>
+      <div class="card">
+        <h3 id="board-title">Рейтинг месяца</h3>
+        <div class="small muted">Сначала по числу посещений, при равенстве — по тоннажу</div>
+        <div id="board-list"></div>
+      </div>
+    </section>
+
+    <section id="awards" hidden>
+      <div class="ach-grid" id="ach"></div>
+      <h2>Мои рекорды</h2>
+      <div class="card" id="records"></div>
+    </section>
+
+    <div class="card share-row">
+      <div class="grow">
+        <b>Показывать мои тренировки друзьям</b>
+        <div class="small muted">Видны дата, тип тренировки, тоннаж и рекорды.
+          Вес тела, замеры и заметки — никогда.</div>
+      </div>
+      <label class="switch" aria-label="Показывать мои тренировки друзьям">
+        <input type="checkbox" id="share-toggle"><span></span>
+      </label>
+    </div>
+  </main>
+
+  <script src="/static/common.js?v=5"></script>
+  <script src="/static/friends.js?v=5"></script>
+</body>
+</html>
