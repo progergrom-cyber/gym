@@ -68,6 +68,28 @@ $('#p-form').addEventListener('submit', async e => {
 
 $('#logout').addEventListener('click', logout);
 
+// ---------- оформление ----------
+
+function renderThemes() {
+  const cur = store.get('theme', 'lime');
+  $('#themes').innerHTML = Object.entries(THEMES).map(([id, t]) => `
+    <button type="button" class="theme-opt ${id === cur ? 'on' : ''}" data-theme-id="${id}"
+      aria-pressed="${id === cur}">
+      <span class="theme-prev"><i style="background:${t.bg}"></i><i style="background:${t.s}"></i>
+        <i style="background:${t.a}"></i><i style="background:${t.b}"></i></span>
+      <b>${esc(t.name)}</b><small>${esc(t.desc)}</small>
+    </button>`).join('');
+}
+$('#themes').addEventListener('click', e => {
+  const b = e.target.closest('[data-theme-id]');
+  if (!b) return;
+  store.set('theme', b.dataset.themeId);
+  applyTheme(b.dataset.themeId);
+  renderThemes();
+  toast('Оформление: ' + THEMES[b.dataset.themeId].name);
+});
+renderThemes();
+
 // ---------- каталог ----------
 
 async function loadCatalog() {
@@ -118,8 +140,7 @@ function renderCatalog() {
             </span>
           </button>
           <label class="switch" aria-label="Использовать в моих планах">
-            <input type="checkbox" class="toggle" ${e.mine && e.club_active ? 'checked' : ''}
-              ${e.club_active ? '' : 'disabled'}><span></span>
+            <input type="checkbox" class="toggle" ${e.mine && e.club_active ? 'checked' : ''}><span></span>
           </label>
         </div>`).join('')}
     </div>`).join('');
@@ -134,7 +155,20 @@ $('#ex-list').addEventListener('click', e => {
 $('#ex-list').addEventListener('change', async e => {
   if (!e.target.classList.contains('toggle')) return;
   const id = Number(e.target.closest('[data-id]').dataset.id);
+  const ex = catalog.items.find(x => x.id === id);
   try {
+    if (!ex.club_active) {
+      // Упражнение отмечено «нет в клубе» для всех — спросим, вернуть ли
+      if (!confirm(`«${ex.name}» отмечено как «нет в клубе» для всех. Тренажёр есть в зале? Вернуть его в каталог для всех?`)) {
+        e.target.checked = false;
+        return;
+      }
+      await api('PUT', `/api/exercises/${id}`, { ...ex, club_active: true });
+      await api('PUT', `/api/exercises/${id}/mine`, { enabled: true });
+      toast('Упражнение вернулось в каталог');
+      loadCatalog();
+      return;
+    }
     await api('PUT', `/api/exercises/${id}/mine`, { enabled: e.target.checked });
     toast(e.target.checked ? 'Будет попадать в ваши планы' : 'Больше не попадёт в ваши планы');
     loadCatalog();

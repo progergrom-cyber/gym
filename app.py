@@ -242,8 +242,44 @@ def week_info(conn, user):
         "SELECT COUNT(DISTINCT date) FROM workouts WHERE user_id=? "
         "AND status='done' AND date >= ?", (user["id"], monday)).fetchone()[0]
     last = conn.execute(
-        "SELECT date, kind FROM workouts WHERE user_id=? AND status='done' "
+        "SELECT id, date, kind FROM workouts WHERE user_id=? AND status='done' "
         "ORDER BY date DESC, id DESC LIMIT 1", (user["id"],)).fetchone()
+    days = {}
+    for r in conn.execute(
+            "SELECT date, kind FROM workouts WHERE user_id=? AND status='done' "
+            "AND date >= ? ORDER BY date, id", (user["id"], monday)):
+        days.setdefault(r["date"], [])
+        if r["kind"] not in days[r["date"]]:
+            days[r["date"]].append(r["kind"])
+    vol = conn.execute(
+        "SELECT COALESCE(SUM(s.weight * s.reps), 0), COUNT(s.id) "
+        "FROM sets s JOIN workouts w ON w.id = s.workout_id "
+        "WHERE w.user_id=? AND w.status='done' AND w.date >= ?",
+        (user["id"], monday)).fetchone()
+    last_info = None
+    if last:
+        rows = conn.execute(
+            """
+            SELECT e.name, MAX(s.weight) AS top, COUNT(s.id) AS sets,
+                   SUM(s.weight * s.reps) AS volume,
+                   (SELECT MAX(s2.weight) FROM sets s2
+                    JOIN workouts w2 ON w2.id = s2.workout_id
+                    WHERE w2.user_id = w.user_id AND w2.status = 'done'
+                      AND s2.exercise_id = s.exercise_id
+                      AND (w2.date < w.date OR (w2.date = w.date AND w2.id < w.id))
+                   ) AS prev
+            FROM sets s JOIN workouts w ON w.id = s.workout_id
+            JOIN exercises e ON e.id = s.exercise_id
+            WHERE w.id = ? GROUP BY s.exercise_id
+            """, (last["id"],)).fetchall()
+        last_info = {
+            "date": last["date"], "kind": last["kind"],
+            "kind_label": planner.KINDS.get(last["kind"], last["kind"]),
+            "exercises": len(rows), "sets": sum(r["sets"] for r in rows),
+            "volume": round(sum(r["volume"] for r in rows)),
+            "records": [{"name": r["name"], "weight": r["top"], "prev": r["prev"]}
+                        for r in rows if r["prev"] is not None and r["top"] > r["prev"]],
+        }
     few = user["freq"] <= 2
     if last is None:
         suggest = "full" if few else "upper"
@@ -255,9 +291,11 @@ def week_info(conn, user):
         "visits": visits,
         "goal": user["freq"],
         "suggest": suggest,
-        "last": {"date": last["date"], "kind": last["kind"],
-                 "kind_label": planner.KINDS.get(last["kind"], last["kind"])}
-        if last else None,
+        "monday": monday,
+        "days": [{"date": d, "kinds": k} for d, k in days.items()],
+        "volume": round(vol[0]),
+        "sets": vol[1],
+        "last": last_info,
     }
 
 

@@ -312,7 +312,8 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
     # Все включённые силовые упражнения — чтобы добавить в план вручную
     # (работает и без интернета). Порядок — как в списке групп мышц.
     order_m = list(MUSCLES)
-    pool = sorted((e for e in exercises if e.get("active", True)
+    pool = sorted((e for e in exercises
+                   if e.get("club_active", e.get("active", True))
                    and e["muscle"] in MUSCLES and e["muscle"] != "cardio"),
                   key=lambda e: (order_m.index(e["muscle"]), e["name"]))
 
@@ -326,5 +327,6 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
         "items": items,
         "warnings": warnings,
         "gaps": gaps,
-        "pool": [_item(e, profile, minutes, history, 0, notes) for e in pool],
+        "pool": [dict(_item(e, profile, minutes, history, 0, notes),
+                      off=not e.get("mine", True)) for e in pool],
     }

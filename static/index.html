@@ -7,7 +7,8 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <script>try{var t=JSON.parse(localStorage.getItem('gym_theme')||'null');if(t&&t!=='lime'){document.documentElement.dataset.theme=t;}}catch(e){}</script>
+  <link rel="stylesheet" href="/static/style.css?v=8">
   <title>Тренировка</title>
 </head>
 <body>
@@ -19,7 +20,7 @@
 
   <div id="timer" class="timer" hidden>
     <svg class="timer-ring" width="52" height="52" viewBox="0 0 52 52" aria-hidden="true">
-      <circle cx="26" cy="26" r="21" fill="none" style="stroke:rgba(255,255,255,.1)" stroke-width="6"/>
+      <circle cx="26" cy="26" r="21" fill="none" style="stroke:var(--timer-track)" stroke-width="6"/>
       <circle id="timer-ring" cx="26" cy="26" r="21" fill="none" style="stroke:var(--violet)" stroke-width="6"
         stroke-linecap="round" stroke-dasharray="0 132" transform="rotate(-90 26 26)"/>
     </svg>
@@ -31,7 +32,7 @@
     <button id="t-skip" class="btn small primary" type="button">Готов</button>
   </div>
 
-  <script src="/static/common.js?v=7"></script>
-  <script src="/static/workout.js?v=7"></script>
+  <script src="/static/common.js?v=8"></script>
+  <script src="/static/workout.js?v=8"></script>
 </body>
 </html>

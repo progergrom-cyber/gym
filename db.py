@@ -121,6 +121,21 @@ def init_db(conn):
             conn.execute("UPDATE exercises SET tips=? WHERE name=? AND tips=''",
                          ("\n".join(lines), name))
         conn.execute("INSERT INTO meta (key, value) VALUES ('tips_v1', '1')")
+    # Раньше общий переключатель использовали как «мне не нравится».
+    # Переносим такие выключения в личные — каждый сможет включить обратно.
+    # Запасные упражнения первой версии остаются «нет в клубе».
+    if not conn.execute("SELECT 1 FROM meta WHERE key='personal_v1'").fetchone():
+        spares = {e["name"] for e in SEED[:V1_COUNT] if not e.get("active", True)}
+        users = [r[0] for r in conn.execute("SELECT id FROM users")]
+        for ex_id, name in conn.execute(
+                "SELECT id, name FROM exercises WHERE active=0").fetchall():
+            if name in spares:
+                continue
+            conn.execute("UPDATE exercises SET active=1 WHERE id=?", (ex_id,))
+            conn.executemany(
+                "INSERT OR IGNORE INTO user_hidden (user_id, exercise_id) VALUES (?, ?)",
+                [(u, ex_id) for u in users])
+        conn.execute("INSERT INTO meta (key, value) VALUES ('personal_v1', '1')")
     conn.commit()
 
 

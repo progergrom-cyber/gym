@@ -46,6 +46,52 @@ function daysAgo(iso) {
   return `${n} дней назад`;
 }
 
+function fmtKg(v) {
+  if (v >= 10000) return fmtNum(Math.round(v / 100) / 10) + ' т';
+  return Math.round(v).toLocaleString('ru-RU') + ' кг';
+}
+
+const KIND_LETTER = { upper: 'В', lower: 'Н', full: 'Ф', glutes: 'Ж' };
+
+// Дашборд: полоска недели Пн–Вс и цифры
+function renderWeek(week) {
+  const [y, m, d] = week.monday.split('-').map(Number);
+  const today = todayISO();
+  const byDate = Object.fromEntries((week.days || []).map(x => [x.date, x.kinds]));
+  const cells = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((name, i) => {
+    const dt = new Date(y, m - 1, d + i);
+    const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    const kinds = byDate[iso];
+    const cls = [kinds ? 'v' : '', iso === today ? 'now' : '', iso > today ? 'future' : ''].join(' ');
+    return `<div class="wk-day"><span class="wk-name">${name}</span>
+      <span class="wk-cell ${cls}">${kinds ? kinds.map(k => KIND_LETTER[k] || '•').join('') : dt.getDate()}</span></div>`;
+  }).join('');
+  const pct = Math.min(100, week.visits / week.goal * 100);
+  return `
+    <a class="week-strip" href="/progress#visits" aria-label="Посещения на этой неделе">${cells}</a>
+    <div class="stats three">
+      <div class="stat"><div class="stat-v">${week.visits}<small>/${week.goal}</small></div>
+        <div class="stat-l">цель недели</div>
+        <span class="mini-progress"><i style="width:${pct}%"></i></span></div>
+      <div class="stat"><div class="stat-v">${week.volume ? fmtKg(week.volume) : '0'}</div>
+        <div class="stat-l">тоннаж недели</div></div>
+      <div class="stat"><div class="stat-v">${week.sets}</div>
+        <div class="stat-l">подходов</div></div>
+    </div>`;
+}
+
+function renderLast(last) {
+  if (!last) return '';
+  return `
+    <a class="card last-card" href="/progress#history">
+      <div class="small muted">Прошлая тренировка · ${esc(fmtDate(last.date))}</div>
+      <div class="last-title"><b>${esc(last.kind_label)}</b>
+        <span class="muted small">${last.exercises} упр. · ${last.sets} подх. · ${fmtKg(last.volume)}</span></div>
+      ${last.records.map(r => `<div class="record">⭐ Рекорд: ${esc(r.name)} — <b>${fmtNum(r.weight)} кг</b>
+        <span class="muted">(было ${fmtNum(r.prev)})</span></div>`).join('')}
+    </a>`;
+}
+
 // ---------- главная ----------
 
 function currentChoice() {
@@ -65,22 +111,12 @@ function renderSetup(message) {
   const injuries = (p.injuries || []).map(i => INJURY_LABELS[i]).join(', ');
   setTitle(p.username ? `Привет, ${p.username}` : 'Тренировка');
 
-  let weekText = '';
-  if (week) {
-    const left = week.goal - week.visits;
-    weekText = left > 0
-      ? `ещё ${left} ${left === 1 ? 'тренировка' : left < 5 ? 'тренировки' : 'тренировок'} до цели`
-      : 'цель недели выполнена 🎉';
-  }
 
   root.innerHTML = `
     ${message ? `<div class="note ok">${esc(message)}</div>` : ''}
     ${needProfile ? `<div class="note warn">Заполните рост в разделе
       <a href="/settings">Профиль</a> и вес в разделе <a href="/progress#body">Прогресс</a>.</div>` : ''}
-    ${week ? `<a class="week-line" href="/progress#visits">
-      ${ring(64, 7, week.visits / week.goal, 'var(--accent)', `${week.visits}/${week.goal}`)}
-      <div><b>Неделя</b><div class="small muted">${weekText}</div></div>
-    </a>` : ''}
+    ${week && week.monday ? renderWeek(week) : ''}
 
     <div class="hero today">
       <div class="small muted">${choice.own ? 'Ваш выбор на сегодня' : 'Сегодня советуем'}</div>
@@ -98,6 +134,8 @@ function renderSetup(message) {
           class="tile ${k === choice.kind ? 'on' : ''}"><b>${label}</b><small>${KIND_HINTS[k]}</small></button>`).join('')}
       </div>
     </div>
+
+    ${week && week.last && week.last.exercises !== undefined ? renderLast(week.last) : ''}
 
     <a class="card profile-line" href="/settings">
       <div class="grow">
@@ -600,7 +638,7 @@ function fillAddList(dlg) {
     html += `<button class="add-row" type="button" data-id="${i.exercise_id}">
       <span class="thumb">${i.photo ? `<img src="${esc(i.photo)}" alt="" loading="lazy">` : DUMBBELL_SVG}</span>
       <span class="grow">${esc(i.name)}
-        <small>${esc(i.equipment || '—')} · ${i.sets} × ${i.rep_lo}–${i.rep_hi}${
+        <small>${i.off ? '<b class="off-label">выключено вами</b> · ' : ''}${esc(i.equipment || '—')} · ${i.sets} × ${i.rep_lo}–${i.rep_hi}${
           i.risky && i.risky.length ? ' · ⚠ ' + i.risky.map(z => INJURY_LABELS[z]).join(', ') : ''}</small>
       </span>
     </button>`;

@@ -122,12 +122,14 @@ class AppTests(unittest.TestCase):
         def plan_ids(c):
             p = c.post("/api/plan", json={"minutes": 90, "kind": "upper"}).get_json()["plan"]
             return ({i["exercise_id"] for i in p["items"]},
-                    {i["exercise_id"] for i in p["pool"]}, p["gaps"])
+                    {i["exercise_id"] for i in p["pool"] if not i["off"]}, p["gaps"],
+                    {i["exercise_id"] for i in p["pool"] if i["off"]})
 
-        items, pool, gaps = plan_ids(dan)
+        items, pool, gaps, off = plan_ids(dan)
         self.assertFalse(hidden & (items | pool))
+        self.assertEqual(off, hidden)        # можно добавить вручную, с пометкой
         self.assertIn("back_lats", {g["muscle"] for g in gaps})
-        items, pool, _ = plan_ids(eva)
+        items, pool, _, _ = plan_ids(eva)
         self.assertTrue(hidden & items)
 
         cat = {e["id"]: e for e in dan.get("/api/exercises").get_json()["items"]}
@@ -167,6 +169,23 @@ class AppTests(unittest.TestCase):
 
 
 class UpgradeTests(unittest.TestCase):
+
+    def test_old_global_off_becomes_personal(self):
+        path = os.path.join(_tmp, "old_toggle.db")
+        conn = db.connect(path)
+        db.init_db(conn)
+        conn.execute("DELETE FROM meta WHERE key='personal_v1'")
+        conn.execute("INSERT INTO users (username, password_hash) VALUES ('a', 'x'), ('b', 'x')")
+        conn.execute("UPDATE exercises SET active=0 WHERE name='Молот с гантелями'")
+        conn.commit()
+        db.init_db(conn)
+        hammer = conn.execute("SELECT id, active FROM exercises WHERE name='Молот с гантелями'").fetchone()
+        self.assertEqual(hammer["active"], 1)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM user_hidden WHERE exercise_id=?",
+                                      (hammer["id"],)).fetchone()[0], 2)
+        spare = conn.execute("SELECT active FROM exercises WHERE name='Скручивания на пресс'").fetchone()
+        self.assertEqual(spare["active"], 0)
+        conn.close()
 
     def test_old_db_gets_tips_once(self):
         path = os.path.join(_tmp, "old.db")

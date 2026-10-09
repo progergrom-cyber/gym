@@ -12,6 +12,23 @@ const INJURY_LABELS = {
   knees: 'колени', lower_back: 'поясница', shoulders: 'плечи', elbows: 'локти',
 };
 
+// Темы оформления: id -> название, описание, цвета для превью
+const THEMES = {
+  lime: { name: 'Графит и лайм', desc: 'Тёмная, яркий лаймовый акцент', bg: '#0b0c0f', s: '#15171c', a: '#d4ff3a', b: '#a294ff' },
+  neon: { name: 'Неон DDX', desc: 'Фиолетовый неон и бирюза, как подсветка в клубе', bg: '#0a0812', s: '#16121f', a: '#a95bff', b: '#2ee6d6' },
+  fire: { name: 'Огонь', desc: 'Тёплый графит и оранжевый, крупные заголовки', bg: '#120d0b', s: '#1e1714', a: '#ff6b2c', b: '#ffc247' },
+  ocean: { name: 'Океан', desc: 'Глубокий синий и голубой, мягкие формы', bg: '#0a1220', s: '#121d31', a: '#3ecfff', b: '#9fb2ff' },
+  light: { name: 'Светлая', desc: 'Белый фон и фиолетовый акцент — для яркого солнца', bg: '#f2f2f6', s: '#ffffff', a: '#6b4dff', b: '#d6336c' },
+};
+
+function applyTheme(id) {
+  if (!THEMES[id]) id = 'lime';
+  if (id === 'lime') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = id;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', THEMES[id].bg);
+}
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -218,7 +235,9 @@ async function logout() {
     return;
   }
   try { await api('POST', '/api/logout', {}); } catch (e) { /* выйдем локально */ }
+  const theme = store.get('theme');
   store.clearAll();
+  if (theme) store.set('theme', theme);
   if ('caches' in window) await caches.delete('gym-api');
   location.href = '/login';
 }
@@ -229,3 +248,4 @@ if ('serviceWorker' in navigator) {
   });
 }
 document.addEventListener('DOMContentLoaded', showNetState);
+applyTheme(store.get('theme', 'lime'));
