@@ -312,7 +312,7 @@ def exercise_from_request(data):
         "region": data["region"],
         "stress": [s for s in data.get("stress") or []
                    if s in planner.INJURIES],
-        "active": bool(data.get("active", True)),
+        "active": bool(data.get("club_active", data.get("active", True))),
         "tips": "\n".join(line.strip() for line in
                           str(data.get("tips") or "").splitlines()
                           if line.strip())[:2000],
@@ -322,7 +322,7 @@ def exercise_from_request(data):
 @app.get("/api/exercises")
 @login_required
 def list_exercises():
-    exercises = db.all_exercises(get_db())
+    exercises = db.exercises_for(get_db(), g.user["id"])
     active = [e for e in exercises if e["active"]]
     have = {e["muscle"] for e in active}
     missing = [{"muscle": m, "label": label, "hint": planner.MUSCLE_HINTS[m]}
@@ -331,6 +331,18 @@ def list_exercises():
     return jsonify(items=exercises, missing=missing,
                    muscles={k: v[0] for k, v in planner.MUSCLES.items()},
                    injuries=planner.INJURIES)
+
+
+@app.put("/api/exercises/<int:ex_id>/mine")
+@login_required
+def toggle_mine(ex_id):
+    """Личный переключатель: использовать ли упражнение в моих планах."""
+    conn = get_db()
+    if not conn.execute("SELECT 1 FROM exercises WHERE id=?", (ex_id,)).fetchone():
+        raise ApiError("Упражнение не найдено", 404)
+    db.set_hidden(conn, g.user["id"], ex_id, not body().get("enabled", True))
+    conn.commit()
+    return jsonify(ok=True)
 
 
 @app.post("/api/exercises")
@@ -426,7 +438,7 @@ def make_plan():
     uid = g.user["id"]
     profile = profile_dict(g.user)
     plan = planner.build_plan(
-        db.all_exercises(conn), profile, minutes, kind,
+        db.exercises_for(conn, uid), profile, minutes, kind,
         recent_ids=db.recent_exercise_ids(conn, uid),
         history=db.last_sets(conn, uid),
         notes=db.user_notes(conn, uid))

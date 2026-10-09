@@ -87,10 +87,13 @@ function renderCatalog() {
       <details class="note warn"><summary>Не хватает упражнений: ${missing.length}
         ${missing.length === 1 ? 'группа' : missing.length < 5 ? 'группы' : 'групп'} мышц</summary>
         <ul>${missing.map(m => {
-          const off = items.find(e => e.muscle === m.muscle && !e.active);
-          return `<li><b>${esc(m.label)}</b>: ${off
-            ? `включите «${esc(off.name)}», если такой тренажёр есть`
-            : `например, ${esc(m.hint)}`}</li>`;
+          const mineOff = items.find(e => e.muscle === m.muscle && e.club_active && !e.mine);
+          const clubOff = items.find(e => e.muscle === m.muscle && !e.club_active);
+          return `<li><b>${esc(m.label)}</b>: ${mineOff
+            ? `вы выключили «${esc(mineOff.name)}» — включите, если подходит`
+            : clubOff
+              ? `«${esc(clubOff.name)}» отмечено как «нет в клубе» — откройте его, если тренажёр есть`
+              : `например, ${esc(m.hint)}`}</li>`;
         }).join('')}</ul></details>`;
   } else {
     $('#missing').innerHTML = '';
@@ -110,12 +113,13 @@ function renderCatalog() {
               ? `<img src="${esc(e.photo_url)}" alt="" loading="lazy">` : DUMBBELL_SVG}</span>
             <span class="grow">
               ${esc(e.name)}
-              <small>${esc(e.equipment || '—')} · ${e.kind === 'compound' ? 'база' : 'изоляция'}${
+              <small>${e.club_active ? '' : '<b class="off-label">нет в клубе</b> · '}${esc(e.equipment || '—')} · ${e.kind === 'compound' ? 'база' : 'изоляция'}${
                 e.stress.length ? ' · ⚠ ' + e.stress.map(s => INJURY_LABELS[s]).join(', ') : ''}</small>
             </span>
           </button>
-          <label class="switch" aria-label="Включено">
-            <input type="checkbox" class="toggle" ${e.active ? 'checked' : ''}><span></span>
+          <label class="switch" aria-label="Использовать в моих планах">
+            <input type="checkbox" class="toggle" ${e.mine && e.club_active ? 'checked' : ''}
+              ${e.club_active ? '' : 'disabled'}><span></span>
           </label>
         </div>`).join('')}
     </div>`).join('');
@@ -130,10 +134,9 @@ $('#ex-list').addEventListener('click', e => {
 $('#ex-list').addEventListener('change', async e => {
   if (!e.target.classList.contains('toggle')) return;
   const id = Number(e.target.closest('[data-id]').dataset.id);
-  const ex = catalog.items.find(x => x.id === id);
   try {
-    await api('PUT', `/api/exercises/${id}`, { ...ex, active: e.target.checked });
-    toast(e.target.checked ? 'Упражнение включено' : 'Упражнение выключено');
+    await api('PUT', `/api/exercises/${id}/mine`, { enabled: e.target.checked });
+    toast(e.target.checked ? 'Будет попадать в ваши планы' : 'Больше не попадёт в ваши планы');
     loadCatalog();
   } catch (err) {
     e.target.checked = !e.target.checked;
@@ -161,7 +164,7 @@ function openEditor(id) {
   for (const f of ['name', 'equipment', 'muscle', 'target', 'helpers', 'kind', 'region', 'tips']) {
     fields[f].value = ex[f] || '';
   }
-  fields.active.checked = ex.active;
+  fields.active.checked = id ? ex.club_active : true;
   exForm.querySelectorAll('[name=stress]').forEach(c => { c.checked = ex.stress.includes(c.value); });
   $('#ex-error').textContent = '';
   photoChange = null;
@@ -247,7 +250,7 @@ exForm.addEventListener('submit', async e => {
   const data = {
     name: f.name.value, equipment: f.equipment.value, muscle: f.muscle.value,
     target: f.target.value, helpers: f.helpers.value, kind: f.kind.value,
-    region: f.region.value, active: f.active.checked, tips: f.tips.value,
+    region: f.region.value, club_active: f.active.checked, tips: f.tips.value,
     stress: [...exForm.querySelectorAll('[name=stress]:checked')].map(c => c.value),
   };
   try {

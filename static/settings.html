@@ -7,7 +7,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-  <link rel="stylesheet" href="/static/style.css?v=5">
+  <link rel="stylesheet" href="/static/style.css?v=6">
   <title>Профиль</title>
 </head>
 <body>
@@ -61,8 +61,10 @@
 
     <!-- Каталог тренажёров -->
     <section id="catalog" hidden>
-      <p class="small muted">Каталог общий для всех в вашей группе. Выключенные
-        упражнения не попадают в план.</p>
+      <p class="small muted">Переключатель справа — <b>только для вас</b>: выключите то,
+        что не нравится или не подходит, и оно не будет попадать в ваши планы.
+        Описание, фото и «есть ли тренажёр в клубе» — общие для всех, это меняется
+        в окне упражнения.</p>
       <div id="missing"></div>
       <button class="btn primary wide" id="add-ex" type="button">+ Добавить упражнение</button>
       <div id="ex-list"><p class="muted">Загрузка…</p></div>
@@ -100,7 +102,9 @@
       <label class="field"><span>Как делать (каждый совет с новой строки)</span>
         <textarea name="tips" rows="5" maxlength="2000"
           placeholder="Спина прижата к спинке.&#10;Вниз медленно."></textarea></label>
-      <label class="choice"><input type="checkbox" name="active"> Включено</label>
+      <label class="choice"><input type="checkbox" name="active">
+        <span>Есть в нашем клубе<small>Общая настройка для всех. Если снять — упражнение
+          пропадёт из планов у всех.</small></span></label>
       <div class="form-error" id="ex-error"></div>
       <div class="dialog-actions">
         <button class="btn ghost" type="button" id="ex-cancel">Отмена</button>
@@ -109,7 +113,7 @@
     </form>
   </dialog>
 
-  <script src="/static/common.js?v=5"></script>
-  <script src="/static/settings.js?v=5"></script>
+  <script src="/static/common.js?v=6"></script>
+  <script src="/static/settings.js?v=6"></script>
 </body>
 </html>

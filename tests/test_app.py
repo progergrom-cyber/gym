@@ -111,6 +111,40 @@ class AppTests(unittest.TestCase):
         self.assertEqual(next(e for e in items if e["id"] == eid)["tips"],
                          "Первый\nВторой")
 
+    def test_personal_toggle_affects_only_me(self):
+        dan = new_client("dan")
+        eva = new_client("eva")
+        hidden = {ex_id("Вертикальная тяга тросовая"), ex_id("Кроссовер: вертикальная тяга")}
+        for eid in hidden:
+            self.assertEqual(dan.put(f"/api/exercises/{eid}/mine",
+                                     json={"enabled": False}).status_code, 200)
+
+        def plan_ids(c):
+            p = c.post("/api/plan", json={"minutes": 90, "kind": "upper"}).get_json()["plan"]
+            return ({i["exercise_id"] for i in p["items"]},
+                    {i["exercise_id"] for i in p["pool"]}, p["gaps"])
+
+        items, pool, gaps = plan_ids(dan)
+        self.assertFalse(hidden & (items | pool))
+        self.assertIn("back_lats", {g["muscle"] for g in gaps})
+        items, pool, _ = plan_ids(eva)
+        self.assertTrue(hidden & items)
+
+        cat = {e["id"]: e for e in dan.get("/api/exercises").get_json()["items"]}
+        for eid in hidden:
+            self.assertFalse(cat[eid]["mine"])
+            self.assertTrue(cat[eid]["club_active"])
+
+        # Правка в редакторе не сбрасывает «есть в клубе» из-за личного выключения
+        eid = next(iter(hidden))
+        self.assertEqual(dan.put(f"/api/exercises/{eid}", json=cat[eid]).status_code, 200)
+        cat_eva = {e["id"]: e for e in eva.get("/api/exercises").get_json()["items"]}
+        self.assertTrue(cat_eva[eid]["active"])
+
+        dan.put(f"/api/exercises/{eid}/mine", json={"enabled": True})
+        cat = {e["id"]: e for e in dan.get("/api/exercises").get_json()["items"]}
+        self.assertTrue(cat[eid]["mine"])
+
     def test_friends_page_served(self):
         c = gym_app.app.test_client()
         r = c.get("/friends")

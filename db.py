@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS exercise_notes (
     PRIMARY KEY (user_id, exercise_id)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS user_hidden (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+    PRIMARY KEY (user_id, exercise_id)
+);
 CREATE INDEX IF NOT EXISTS idx_sets_workout ON sets(workout_id);
 CREATE INDEX IF NOT EXISTS idx_workouts_user ON workouts(user_id, status);
 """
@@ -209,3 +214,30 @@ def save_notes(conn, user_id, notes):
         else:
             conn.execute("DELETE FROM exercise_notes WHERE user_id=? "
                          "AND exercise_id=?", (user_id, ex_id))
+
+
+def hidden_ids(conn, user_id):
+    """Упражнения, которые пользователь выключил лично для себя."""
+    return {r[0] for r in conn.execute(
+        "SELECT exercise_id FROM user_hidden WHERE user_id=?", (user_id,))}
+
+
+def set_hidden(conn, user_id, exercise_id, hidden):
+    if hidden:
+        conn.execute("INSERT OR IGNORE INTO user_hidden (user_id, exercise_id) "
+                     "VALUES (?, ?)", (user_id, exercise_id))
+    else:
+        conn.execute("DELETE FROM user_hidden WHERE user_id=? AND exercise_id=?",
+                     (user_id, exercise_id))
+
+
+def exercises_for(conn, user_id):
+    """Каталог глазами пользователя: active = есть в клубе И не выключено им."""
+    hidden = hidden_ids(conn, user_id)
+    out = []
+    for e in all_exercises(conn):
+        e["club_active"] = e["active"]
+        e["mine"] = e["id"] not in hidden
+        e["active"] = e["club_active"] and e["mine"]
+        out.append(e)
+    return out
