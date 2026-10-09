@@ -447,3 +447,81 @@ canvas.chart { width: 100%; height: 220px; display: block; }
 
 .off-label { color: var(--warn); font-weight: 700; }
 .switch input:disabled + span { opacity: .35; }
+
+/* ---------- «Фокус»: главная ---------- */
+.week-line { display: flex; align-items: center; gap: 14px; color: inherit; text-decoration: none; margin-top: 4px; }
+.today { margin-top: 14px; padding: 18px 16px; }
+.today-kind { font-size: 34px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 2px 0 4px; }
+.chips-row { display: flex; gap: 6px; margin-top: 14px; }
+.chip-btn {
+  flex: 1; min-height: 44px; border: 0; border-radius: 12px; background: var(--surface-2);
+  color: var(--text); font: inherit; font-weight: 700;
+}
+.chip-btn.on { background: var(--text); color: var(--bg); }
+.today .btn.big { margin-top: 14px; }
+.link-btn {
+  display: block; margin: 12px auto 0; padding: 6px 10px; border: 0; background: none;
+  color: var(--muted); font: inherit; font-size: 15px; cursor: pointer;
+}
+.today .tiles { margin-top: 10px; }
+a.profile-line { color: inherit; text-decoration: none; }
+
+/* ---------- «Фокус»: тренировка ---------- */
+.focus-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.seg-progress { flex: 1; display: flex; gap: 3px; }
+.seg-step { flex: 1; height: 8px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--surface-3); cursor: pointer; }
+.seg-step.part { background: rgba(212, 255, 58, .4); }
+.seg-step.done { background: var(--accent); }
+.seg-step.cur { background: var(--text); }
+.focus-top .btn { flex: none; }
+.focus-photo {
+  display: block; width: 100%; height: 200px; padding: 0; border: 0; border-radius: 20px; overflow: hidden;
+  margin-bottom: 12px; background: var(--surface-2); cursor: zoom-in;
+}
+.focus-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.focus-name { font-size: 26px; line-height: 1.15; margin: 2px 0 2px; color: var(--text); text-transform: none; letter-spacing: -.01em; font-weight: 800; }
+.set-title { margin-top: 18px; font-size: 18px; font-weight: 800; }
+.steppers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.stepper { background: var(--surface); border-radius: 18px; padding: 10px 8px; text-align: center; }
+.stepper-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .05em; text-transform: uppercase; }
+.stepper-row { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.step {
+  flex: none; width: 48px; height: 56px; border: 0; border-radius: 14px; background: var(--surface-2);
+  color: var(--text); font-size: 28px; font-weight: 700; line-height: 1;
+}
+.step:active { background: var(--surface-3); }
+.step-val {
+  flex: 1; min-width: 0; width: 100%; height: 56px; border: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: 30px; font-weight: 800; text-align: center; outline: none;
+}
+.set-done { min-height: 68px; font-size: 21px; }
+.done-sets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.done-chip {
+  padding: 8px 12px; border: 0; border-radius: 12px; background: var(--accent-soft); color: var(--accent);
+  font: inherit; font-size: 15px; font-weight: 700;
+}
+.nav-row { display: flex; gap: 8px; margin-top: 18px; }
+.nav-row .btn { flex: none; }
+.nav-row .next-btn { flex: 1; flex-direction: column; align-items: flex-start; gap: 0; padding: 8px 14px; text-align: left; line-height: 1.25; }
+.nav-row .next-btn .small { font-weight: 600; }
+
+/* Таймер-кольцо */
+.timer-ring { flex: none; }
+
+/* Список упражнений плана */
+.ov-list { margin-top: 10px; max-height: 58vh; overflow-y: auto; }
+.ov-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.ov-row.cur { background: var(--accent-soft); border-radius: 12px; padding-left: 8px; padding-right: 6px; }
+.ov-row.finished .ov-go { color: var(--muted); }
+.ov-go {
+  flex: 1; min-width: 0; min-height: 48px; padding: 4px 0; border: 0; background: none; color: var(--text);
+  font: inherit; font-weight: 700; text-align: left; cursor: pointer;
+}
+.ov-go small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+.ov-row .icon-btn { width: 40px; height: 40px; font-size: 18px; }
+.ov-row .icon-btn:disabled { opacity: .25; }
+.dialog-body .btn.wide { margin-top: 8px; }
+#overview-dialog { width: calc(100% - 16px); }
+.ov-row { gap: 4px; }
+.ov-row .icon-btn { width: 36px; height: 40px; font-size: 16px; }
+.ov-go { font-size: 15px; }

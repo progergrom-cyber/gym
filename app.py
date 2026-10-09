@@ -226,7 +226,39 @@ def me():
     conn = get_db()
     has_weight = conn.execute("SELECT 1 FROM measurements WHERE user_id=?",
                               (g.user["id"],)).fetchone() is not None
-    return jsonify(profile=profile_dict(g.user), has_weight=has_weight)
+    return jsonify(profile=profile_dict(g.user), has_weight=has_weight,
+                   week=week_info(conn, g.user))
+
+
+# Что посоветовать сегодня после прошлой тренировки (чередуем верх и низ)
+NEXT_KIND = {"upper": "lower", "lower": "upper", "glutes": "upper"}
+
+
+def week_info(conn, user):
+    """Посещения на этой неделе, прошлая тренировка и совет на сегодня."""
+    today = date.today()
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    visits = conn.execute(
+        "SELECT COUNT(DISTINCT date) FROM workouts WHERE user_id=? "
+        "AND status='done' AND date >= ?", (user["id"], monday)).fetchone()[0]
+    last = conn.execute(
+        "SELECT date, kind FROM workouts WHERE user_id=? AND status='done' "
+        "ORDER BY date DESC, id DESC LIMIT 1", (user["id"],)).fetchone()
+    few = user["freq"] <= 2
+    if last is None:
+        suggest = "full" if few else "upper"
+    elif last["kind"] == "full":
+        suggest = "full" if few else "upper"
+    else:
+        suggest = NEXT_KIND.get(last["kind"], "full")
+    return {
+        "visits": visits,
+        "goal": user["freq"],
+        "suggest": suggest,
+        "last": {"date": last["date"], "kind": last["kind"],
+                 "kind_label": planner.KINDS.get(last["kind"], last["kind"])}
+        if last else None,
+    }
 
 
 @app.put("/api/profile")

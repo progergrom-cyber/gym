@@ -145,6 +145,20 @@ class AppTests(unittest.TestCase):
         cat = {e["id"]: e for e in dan.get("/api/exercises").get_json()["items"]}
         self.assertTrue(cat[eid]["mine"])
 
+    def test_week_info_and_suggestion(self):
+        import datetime
+        c = new_client("zoya")
+        week = c.get("/api/me").get_json()["week"]
+        self.assertEqual((week["visits"], week["goal"], week["suggest"]), (0, 3, "upper"))
+        self.assertIsNone(week["last"])
+        today = datetime.date.today().isoformat()
+        finish(c, today, [{"exercise_id": ex_id("Жим от груди"), "set_no": 1,
+                           "weight": 40, "reps": 10}], kind="upper")
+        week = c.get("/api/me").get_json()["week"]
+        self.assertEqual(week["visits"], 1)
+        self.assertEqual(week["suggest"], "lower")
+        self.assertEqual(week["last"]["kind_label"], "Верх")
+
     def test_friends_page_served(self):
         c = gym_app.app.test_client()
         r = c.get("/friends")

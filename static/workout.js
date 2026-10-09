@@ -1,5 +1,6 @@
 'use strict';
-// Страница «Тренировка»: составление плана, отметка подходов, таймер отдыха.
+// Страница «Тренировка» в стиле «Фокус»: на главной — совет на сегодня и
+// кнопка «Начать», во время тренировки — одно упражнение на весь экран.
 
 const MINUTES = [30, 45, 60, 90];
 const KINDS = { upper: 'Верх', lower: 'Низ', full: 'Фулбади', glutes: 'Жопа' };
@@ -20,132 +21,149 @@ function initLog(item) {
   }));
 }
 
-// ---------- экран выбора ----------
+function setTitle(text) { $('#page-title').textContent = text; }
+
+// Кольцо прогресса (неделя, таймер)
+function ring(size, stroke, part, color, label) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const len = Math.max(0, Math.min(1, part)) * c;
+  return `<svg class="ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" style="stroke:var(--surface-3)" stroke-width="${stroke}"/>
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" style="stroke:${color}" stroke-width="${stroke}"
+      stroke-linecap="round" stroke-dasharray="${len} ${c}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
+    <text x="50%" y="50%" dy=".35em" text-anchor="middle" style="fill:var(--text)" font-size="${size / 4.2}"
+      font-weight="800">${label}</text>
+  </svg>`;
+}
+
+function daysAgo(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const n = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(y, m - 1, d)) / 86400000);
+  if (n <= 0) return 'сегодня';
+  if (n === 1) return 'вчера';
+  if (n < 5) return `${n} дня назад`;
+  return `${n} дней назад`;
+}
+
+// ---------- главная ----------
+
+function currentChoice() {
+  const c = store.get('choice', {});
+  const week = me && me.week;
+  // Свой выбор типа держим только сегодня, назавтра снова советуем
+  const kind = c.kindDate === todayISO() && KINDS[c.kind] ? c.kind
+    : (week && week.suggest) || 'full';
+  return { minutes: MINUTES.includes(c.minutes) ? c.minutes : 60, kind, own: kind !== (week && week.suggest) };
+}
 
 function renderSetup(message) {
-  const choice = store.get('choice', { minutes: 60, kind: 'full' });
   const p = (me && me.profile) || {};
-  const injuries = (p.injuries || []).map(i => INJURY_LABELS[i]).join(', ');
+  const week = (me && me.week) || null;
+  const choice = currentChoice();
   const needProfile = me && (!p.height || !me.has_weight);
+  const injuries = (p.injuries || []).map(i => INJURY_LABELS[i]).join(', ');
+  setTitle(p.username ? `Привет, ${p.username}` : 'Тренировка');
+
+  let weekText = '';
+  if (week) {
+    const left = week.goal - week.visits;
+    weekText = left > 0
+      ? `ещё ${left} ${left === 1 ? 'тренировка' : left < 5 ? 'тренировки' : 'тренировок'} до цели`
+      : 'цель недели выполнена 🎉';
+  }
 
   root.innerHTML = `
     ${message ? `<div class="note ok">${esc(message)}</div>` : ''}
     ${needProfile ? `<div class="note warn">Заполните рост в разделе
       <a href="/settings">Профиль</a> и вес в разделе <a href="/progress#body">Прогресс</a>.</div>` : ''}
-    <div class="card profile-line">
+    ${week ? `<a class="week-line" href="/progress#visits">
+      ${ring(64, 7, week.visits / week.goal, 'var(--accent)', `${week.visits}/${week.goal}`)}
+      <div><b>Неделя</b><div class="small muted">${weekText}</div></div>
+    </a>` : ''}
+
+    <div class="hero today">
+      <div class="small muted">${choice.own ? 'Ваш выбор на сегодня' : 'Сегодня советуем'}</div>
+      <div class="today-kind">${KINDS[choice.kind]}</div>
+      <div class="small muted">${esc(KIND_HINTS[choice.kind])}${week && week.last
+        ? ` · в прошлый раз: ${esc(week.last.kind_label)}, ${daysAgo(week.last.date)}` : ''}</div>
+      <div class="chips-row" id="minutes" role="group" aria-label="Время тренировки">
+        ${MINUTES.map(m => `<button type="button" data-v="${m}"
+          class="chip-btn ${m === choice.minutes ? 'on' : ''}">${m}${m === choice.minutes ? ' мин' : ''}</button>`).join('')}
+      </div>
+      <button class="btn primary big" id="make" type="button">Начать</button>
+      <button class="link-btn" id="other-kind" type="button">другой тип тренировки ›</button>
+      <div class="tiles two" id="kind" hidden>
+        ${Object.entries(KINDS).map(([k, label]) => `<button type="button" data-v="${k}"
+          class="tile ${k === choice.kind ? 'on' : ''}"><b>${label}</b><small>${KIND_HINTS[k]}</small></button>`).join('')}
+      </div>
+    </div>
+
+    <a class="card profile-line" href="/settings">
       <div class="grow">
         <div style="font-weight:700">${esc(GOAL_LABELS[p.goal] || '—')}</div>
         <span class="chip">${p.freq || 3} раза в неделю</span>
         ${injuries ? `<span class="chip warn">⚠ ${esc(injuries)}</span>` : ''}
       </div>
-      <a class="btn small ghost" href="/settings">Изменить</a>
-    </div>
-
-    <h2>Сколько есть времени</h2>
-    <div class="tiles" id="minutes">
-      ${MINUTES.map(m => `<button type="button" data-v="${m}"
-        class="tile ${m === choice.minutes ? 'on' : ''}"><b>${m}</b><small>минут</small></button>`).join('')}
-    </div>
-
-    <h2>Что тренируем</h2>
-    <div class="tiles two" id="kind">
-      ${Object.entries(KINDS).map(([k, label]) => `<button type="button" data-v="${k}"
-        class="tile ${k === choice.kind ? 'on' : ''}"><b>${label}</b><small>${KIND_HINTS[k]}</small></button>`).join('')}
-    </div>
-
-    <button class="btn primary big" id="make" type="button">Составить план</button>
+      <span class="muted">›</span>
+    </a>
     <p class="muted small center">Для составления плана нужен интернет.
       Готовый план откроется и в зале без связи.</p>`;
 
-  for (const id of ['minutes', 'kind']) {
-    $('#' + id).addEventListener('click', e => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      $('#' + id).querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
-      const c = store.get('choice', { minutes: 60, kind: 'full' });
-      c[id] = id === 'minutes' ? Number(btn.dataset.v) : btn.dataset.v;
-      store.set('choice', c);
-    });
-  }
+  $('#minutes').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const c = store.get('choice', {});
+    c.minutes = Number(b.dataset.v);
+    store.set('choice', c);
+    renderSetup();
+  });
+  $('#other-kind').addEventListener('click', () => {
+    $('#kind').hidden = !$('#kind').hidden;
+  });
+  $('#kind').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const c = store.get('choice', {});
+    c.kind = b.dataset.v;
+    c.kindDate = todayISO();
+    store.set('choice', c);
+    renderSetup();
+  });
   $('#make').addEventListener('click', makePlan);
 }
 
 async function makePlan() {
   const btn = $('#make');
-  const choice = store.get('choice', { minutes: 60, kind: 'full' });
+  const choice = currentChoice();
   btn.disabled = true;
-  btn.textContent = 'Составляю…';
+  btn.textContent = 'Составляю план…';
   try {
     await flushPending();  // сначала отправим прошлую тренировку, если она ждёт
     const res = await api('POST', '/api/plan',
       { minutes: choice.minutes, kind: choice.kind, date: todayISO() });
     plan = res.plan;
     plan.items.forEach(initLog);
+    plan.cur = -1;          // начинаем с разминки
     save();
     renderPlan();
     window.scrollTo(0, 0);
   } catch (e) {
     toast(e.message, 4000);
     btn.disabled = false;
-    btn.textContent = 'Составить план';
+    btn.textContent = 'Начать';
   }
 }
 
-// ---------- экран плана ----------
+// ---------- тренировка: одно упражнение на экран ----------
 
-function planMinutes() {
-  const sec = plan.warmup_min * 60 + plan.items.reduce((s, i) => s + i.seconds, 0);
-  return Math.round(sec / 60);
-}
-
-function renderItem(item, idx) {
-  const done = item.log.filter(s => s.done).length;
-  const started = done > 0;
-  const complete = done === item.log.length;
-  return `
-  <article class="card ex ${complete ? 'complete' : ''}" data-i="${idx}">
-    ${item.photo ? `<button class="ex-photo" type="button" data-photo="${esc(item.photo)}"
-      aria-label="Открыть фото тренажёра"><img src="${esc(item.photo)}" alt="" loading="lazy"></button>` : ''}
-    <div class="ex-body">
-      <div class="ex-top">
-        <span class="num">${complete ? '✓' : idx + 1}</span>
-        <div>
-          <h3>${esc(item.name)}</h3>
-          <div class="meta">${esc(item.equipment)}${item.equipment ? ' · ' : ''}${esc(item.muscle_label)}</div>
-        </div>
-      </div>
-      <div class="presc">
-        <span>${item.sets} × ${item.rep_lo}–${item.rep_hi}</span>
-        <span>отдых ${fmtSec(item.rest)}</span>
-        <span>${item.kind === 'compound' ? 'база' : 'изоляция'}</span>
-      </div>
-      <div class="hint">${esc(item.hint)}</div>
-      ${renderNote(item)}
-      ${item.tips && item.tips.length ? `
-        <details class="tips" ${item.tipsOpen ? 'open' : ''}>
-          <summary>Как делать</summary>
-          <ul>${item.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
-        </details>` : ''}
-      <div class="sets">
-        <div class="set-head"><span>#</span><span>Вес, кг</span><span>Повторы</span><span></span></div>
-        ${item.log.map((s, j) => `
-          <div class="set ${s.done ? 'done' : ''}" data-j="${j}">
-            <span class="set-no">${j + 1}</span>
-            <input class="w" inputmode="decimal" autocomplete="off" aria-label="Вес, подход ${j + 1}"
-              value="${esc(typeof s.weight === 'number' ? fmtNum(s.weight) : s.weight)}" placeholder="кг" ${s.done ? 'readonly' : ''}>
-            <input class="r" inputmode="numeric" autocomplete="off" aria-label="Повторы, подход ${j + 1}"
-              value="${esc(s.reps)}" placeholder="${item.rep_lo}–${item.rep_hi}" ${s.done ? 'readonly' : ''}>
-            <button class="check" type="button" aria-label="Подход выполнен">${s.done ? '✓' : ''}</button>
-          </div>`).join('')}
-      </div>
-      <div class="ex-actions">
-        <button class="btn small ghost add-set" type="button">+ подход</button>
-        ${started ? '' : '<button class="btn small ghost replace" type="button">Заменить</button>'}
-        ${item.noteOpen || noteOf(item) ? '' : '<button class="btn small ghost edit-note" type="button">📝 Заметка</button>'}
-        <button class="btn small ghost danger remove" type="button">Убрать</button>
-      </div>
-    </div>
-  </article>`;
+function isDone(item) { return item.log.length > 0 && item.log.every(s => s.done); }
+function nextUnfinished(from) {
+  for (let k = 1; k <= plan.items.length; k++) {
+    const i = (from + k) % plan.items.length;
+    if (!isDone(plan.items[i])) return i;
+  }
+  return -1;
 }
 
 // Заметка к упражнению («сиденье на 4»). Хранится за упражнением и
@@ -167,137 +185,378 @@ function renderNote(item) {
   return note ? `<button class="ex-note-view edit-note" type="button">📝 ${esc(note)}</button>` : '';
 }
 
+function progressBar() {
+  return `<div class="seg-progress" role="group" aria-label="Упражнения плана">
+    <button type="button" class="seg-step ${plan.cur === -1 ? 'cur' : 'done'}" data-go="-1"
+      aria-label="Разминка"></button>
+    ${plan.items.map((it, i) => {
+      const done = it.log.filter(s => s.done).length;
+      const cls = i === plan.cur ? 'cur' : isDone(it) ? 'done' : done ? 'part' : '';
+      return `<button type="button" class="seg-step ${cls}" data-go="${i}"
+        aria-label="${i + 1}. ${esc(it.name)}"></button>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderWarmup() {
   const options = plan.warmup || [];
   const w = options[plan.warmup_idx || 0];
+  const warnings = plan.warnings || [];
   return `
-    <div class="card warmup">
-      ${w && w.photo ? `<button class="thumb big ex-photo" type="button" data-photo="${esc(w.photo)}"
-        aria-label="Открыть фото"><img src="${esc(w.photo)}" alt="" loading="lazy"></button>` : ''}
-      <div class="grow">
-        <h3>Разминка ~${plan.warmup_min} мин</h3>
-        <div class="small muted" style="margin-top:4px">${w
-          ? `5 минут: <b style="color:var(--text)">${esc(w.name)}</b>${w.equipment ? ' (' + esc(w.equipment) + ')' : ''}, в лёгком темпе.`
-          : '5 минут лёгкого кардио (дорожка, велотренажёр, эллипс).'}
-          Потом вращения в плечах, локтях, коленях. В базовых упражнениях первый подход
-          можно сделать с половиной веса.</div>
-        ${options.length > 1 ? '<button class="btn small ghost" type="button" id="warmup-next" style="margin-top:10px">Другой тренажёр</button>' : ''}
+    ${w && w.photo ? `<button class="focus-photo ex-photo" type="button" data-photo="${esc(w.photo)}"
+      aria-label="Открыть фото"><img src="${esc(w.photo)}" alt=""></button>` : ''}
+    <div class="small muted">Шаг 1 · перед силовыми</div>
+    <h2 class="focus-name">Разминка ~${plan.warmup_min} мин</h2>
+    <div class="card" style="margin-top:8px">
+      ${w ? `<b>5 минут: ${esc(w.name)}</b>${w.equipment ? `<div class="small muted">${esc(w.equipment)}</div>` : ''}`
+        : '<b>5 минут лёгкого кардио</b><div class="small muted">дорожка, велотренажёр или эллипс</div>'}
+      <div class="small" style="margin-top:8px">Темп лёгкий, можно разговаривать. Потом вращения в плечах,
+        локтях, коленях. В базовых упражнениях первый подход можно сделать с половиной веса.</div>
+      ${options.length > 1 ? '<button class="btn small ghost" type="button" id="warmup-next" style="margin-top:12px">Другой тренажёр</button>' : ''}
+    </div>
+    ${warnings.length ? `<details class="note warn"><summary>Подсказки к плану (${warnings.length})</summary>
+      <ul>${warnings.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+    <button class="btn primary big" type="button" data-go="${plan.items.length ? 0 : -1}">
+      ${plan.items.length ? 'К упражнениям ›' : 'В плане нет упражнений'}</button>
+    <div class="small muted center" style="margin-top:10px">В плане ${plan.items.length} упражнений ·
+      около ${planMinutes()} мин</div>`;
+}
+
+function planMinutes() {
+  const sec = plan.warmup_min * 60 + plan.items.reduce((s, i) => s + i.seconds, 0);
+  return Math.round(sec / 60);
+}
+
+function weightStep(item) { return /гантел/i.test(item.equipment || '') ? 1 : 2.5; }
+function shown(v) { return typeof v === 'number' ? fmtNum(v) : (v ?? ''); }
+
+function renderExercise(idx) {
+  const item = plan.items[idx];
+  const k = item.log.findIndex(s => !s.done);
+  const doneSets = item.log.map((s, j) => ({ ...s, j })).filter(s => s.done);
+  const started = doneSets.length > 0;
+  const next = nextUnfinished(idx);
+  const allDone = plan.items.every(isDone);
+
+  // Значения по умолчанию для текущего подхода
+  if (k >= 0) {
+    const s = item.log[k];
+    const prev = doneSets[doneSets.length - 1];
+    if (s.weight === '' || s.weight == null) s.weight = prev ? prev.weight : (item.weight ?? '');
+    if (s.reps === '' || s.reps == null) s.reps = prev ? prev.reps : item.rep_hi;
+  }
+
+  return `
+  <article class="ex focus" data-i="${idx}">
+    ${item.photo ? `<button class="focus-photo ex-photo" type="button" data-photo="${esc(item.photo)}"
+      aria-label="Открыть фото тренажёра"><img src="${esc(item.photo)}" alt=""></button>` : ''}
+    <div class="small muted">Упражнение ${idx + 1} из ${plan.items.length}</div>
+    <h2 class="focus-name">${esc(item.name)}</h2>
+    <div class="meta">${esc(item.equipment)}${item.equipment ? ' · ' : ''}${esc(item.muscle_label)}</div>
+    <div class="presc">
+      <span>${item.log.length} × ${item.rep_lo}–${item.rep_hi}</span>
+      <span>отдых ${fmtSec(item.rest)}</span>
+      <span>${item.kind === 'compound' ? 'база' : 'изоляция'}</span>
+    </div>
+    <div class="hint">${esc(item.hint)}</div>
+    ${renderNote(item)}
+    ${item.tips && item.tips.length ? `
+      <details class="tips" ${item.tipsOpen ? 'open' : ''}>
+        <summary>Как делать</summary>
+        <ul>${item.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+      </details>` : ''}
+
+    ${k >= 0 ? `
+      <div class="set-title">Подход ${k + 1} из ${item.log.length}</div>
+      <div class="steppers">
+        <div class="stepper">
+          <span class="stepper-label">Вес, кг</span>
+          <div class="stepper-row">
+            <button type="button" class="step" data-f="weight" data-d="-1" aria-label="Меньше вес">−</button>
+            <input class="step-val" data-f="weight" inputmode="decimal" autocomplete="off"
+              aria-label="Вес, кг" value="${esc(shown(item.log[k].weight))}" placeholder="0">
+            <button type="button" class="step" data-f="weight" data-d="1" aria-label="Больше вес">+</button>
+          </div>
+        </div>
+        <div class="stepper">
+          <span class="stepper-label">Повторы</span>
+          <div class="stepper-row">
+            <button type="button" class="step" data-f="reps" data-d="-1" aria-label="Меньше повторов">−</button>
+            <input class="step-val" data-f="reps" inputmode="numeric" autocomplete="off"
+              aria-label="Повторы" value="${esc(shown(item.log[k].reps))}" placeholder="0">
+            <button type="button" class="step" data-f="reps" data-d="1" aria-label="Больше повторов">+</button>
+          </div>
+        </div>
       </div>
-    </div>`;
+      <button class="btn primary big set-done" type="button">Подход сделан ✓</button>`
+    : `<div class="note ok">Все подходы сделаны 👍</div>`}
+
+    ${doneSets.length ? `<div class="done-sets">
+      ${doneSets.map(s => `<button type="button" class="done-chip" data-j="${s.j}"
+        aria-label="Исправить подход ${s.j + 1}">${s.j + 1}: ${fmtNum(s.weight)} × ${s.reps} ✓</button>`).join('')}
+      <div class="small muted" style="width:100%">Нажмите на подход, чтобы исправить</div>
+    </div>` : ''}
+
+    <div class="ex-actions">
+      <button class="btn small ghost add-set" type="button">+ подход</button>
+      ${started ? '' : '<button class="btn small ghost replace" type="button">Заменить</button>'}
+      ${item.noteOpen || noteOf(item) ? '' : '<button class="btn small ghost edit-note" type="button">📝 Заметка</button>'}
+      <button class="btn small ghost danger remove" type="button">Убрать</button>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn ghost" type="button" data-go="${idx - 1}">‹ Назад</button>
+      ${next >= 0 && next !== idx ? `<button class="btn ghost next-btn" type="button" data-go="${next}">
+        <span class="small muted">Дальше</span>${esc(plan.items[next].name)} ›</button>` : ''}
+    </div>
+  </article>
+  <button class="btn ${allDone ? 'primary big' : 'ghost wide'}" id="finish" type="button">Завершить тренировку</button>`;
 }
 
 function renderPlan() {
-  const warnings = plan.warnings || [];
-  const total = plan.items.reduce((n, i) => n + i.log.length, 0);
-  const done = plan.items.reduce((n, i) => n + i.log.filter(s => s.done).length, 0);
-  const pct = total ? Math.round(done / total * 100) : 0;
+  if (plan.cur === undefined) {   // план от прошлой версии приложения
+    plan.cur = plan.items.some(i => i.log.some(s => s.done)) ? Math.max(0, nextUnfinished(-1)) : -1;
+  }
+  if (plan.cur >= plan.items.length) plan.cur = plan.items.length - 1;
+  setTitle(`${plan.kind_label} · ${plan.minutes} мин`);
   root.innerHTML = `
-    <div class="hero">
-      <div class="h">${esc(plan.kind_label)} · ${planMinutes()} мин</div>
-      <div class="small muted">${esc(fmtDate(plan.date))} · ${plan.items.length} упражнений · лимит ${plan.minutes} мин</div>
-      <div class="progress"><i style="width:${pct}%"></i></div>
-      <div class="hero-stats"><span>Сделано подходов: ${done} из ${total}</span><span>${pct}%</span></div>
+    <div class="focus-top">
+      ${progressBar()}
+      <button class="btn small ghost" type="button" id="overview">☰ Все упражнения</button>
     </div>
-    ${warnings.length ? `<details class="note warn"><summary>Подсказки (${warnings.length})</summary>
-      <ul>${warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
-    ${renderWarmup()}
-    ${plan.items.map(renderItem).join('')}
-    ${plan.items.length ? '' : '<div class="note warn">В плане нет упражнений.</div>'}
-    <button class="btn ghost wide" id="add-ex" type="button">＋ Добавить упражнение</button>
-    <button class="btn primary big" id="finish" type="button">Завершить тренировку</button>
-    <button class="btn ghost wide" id="cancel" type="button">Отменить план</button>`;
-  $('#finish').addEventListener('click', finishWorkout);
-  const wn = $('#warmup-next');
-  if (wn) wn.addEventListener('click', () => {
-    plan.warmup_idx = ((plan.warmup_idx || 0) + 1) % plan.warmup.length;
-    save();
-    renderPlan();
-  });
-  $('#cancel').addEventListener('click', cancelPlan);
-  $('#add-ex').addEventListener('click', openAddDialog);
+    ${plan.cur < 0 ? renderWarmup() : renderExercise(plan.cur)}`;
+  const fin = $('#finish');
+  if (fin) fin.addEventListener('click', finishWorkout);
   keepScreenOn();
 }
 
-// Ввод веса и повторов — сохраняем сразу, чтобы ничего не потерялось
+function go(i) {
+  plan.cur = Math.max(-1, Math.min(plan.items.length - 1, i));
+  save();
+  renderPlan();
+  window.scrollTo(0, 0);
+}
+
+// Ввод значений и заметки — сохраняем сразу, чтобы ничего не потерялось
 root.addEventListener('input', e => {
   if (!plan) return;
+  const item = plan.items[plan.cur];
+  if (!item) return;
   if (e.target.classList.contains('ex-note')) {
-    const item = plan.items[e.target.closest('.ex').dataset.i];
     plan.notes = plan.notes || {};
     plan.notes[item.exercise_id] = e.target.value;
     save();
-    return;
+  } else if (e.target.classList.contains('step-val')) {
+    const s = item.log.find(x => !x.done);
+    if (s) { s[e.target.dataset.f] = e.target.value; save(); }
   }
-  const card = e.target.closest('.ex');
-  const row = e.target.closest('.set');
-  if (!card || !row) return;
-  const s = plan.items[card.dataset.i].log[row.dataset.j];
-  if (e.target.classList.contains('w')) s.weight = e.target.value;
-  if (e.target.classList.contains('r')) s.reps = e.target.value;
-  save();
 });
 
 root.addEventListener('click', e => {
   if (!plan) return;
-  const warmPhoto = e.target.closest('.warmup .ex-photo');
-  if (warmPhoto) { showPhoto(warmPhoto.dataset.photo); return; }
-  const card = e.target.closest('.ex');
-  if (!card) return;
-  const idx = Number(card.dataset.i);
-  const item = plan.items[idx];
-
-  if (e.target.closest('.ex-photo')) {
-    showPhoto(e.target.closest('.ex-photo').dataset.photo);
-    return;
-  }
-  if (e.target.closest('.check')) {
-    const row = e.target.closest('.set');
-    toggleSet(item, Number(row.dataset.j), row);
-  } else if (e.target.closest('.add-set')) {
-    const last = item.log[item.log.length - 1];
-    item.log.push({ weight: last ? last.weight : '', reps: '', done: false });
+  const t = e.target;
+  const goBtn = t.closest('[data-go]');
+  if (goBtn) { go(Number(goBtn.dataset.go)); return; }
+  const photo = t.closest('.ex-photo');
+  if (photo) { showPhoto(photo.dataset.photo); return; }
+  if (t.closest('#overview')) { openOverview(); return; }
+  if (t.closest('#warmup-next')) {
+    plan.warmup_idx = ((plan.warmup_idx || 0) + 1) % plan.warmup.length;
     save();
     renderPlan();
-  } else if (e.target.closest('.replace')) {
+    return;
+  }
+
+  const idx = plan.cur;
+  const item = plan.items[idx];
+  if (!item) return;
+
+  if (t.closest('.step')) {
+    const b = t.closest('.step');
+    const s = item.log.find(x => !x.done);
+    if (!s) return;
+    const f = b.dataset.f;
+    const step = f === 'weight' ? weightStep(item) : 1;
+    const cur = parseNum(s[f]) ?? 0;
+    s[f] = Math.max(f === 'reps' ? 1 : 0, Math.round((cur + step * Number(b.dataset.d)) * 100) / 100);
+    save();
+    root.querySelector(`.step-val[data-f="${f}"]`).value = fmtNum(s[f]);
+  } else if (t.closest('.set-done')) {
+    completeSet(item, idx);
+  } else if (t.closest('.done-chip')) {
+    item.log[Number(t.closest('.done-chip').dataset.j)].done = false;
+    save();
+    renderPlan();
+  } else if (t.closest('.add-set')) {
+    const last = item.log[item.log.length - 1];
+    item.log.push({ weight: last ? last.weight : '', reps: last ? last.reps : '', done: false });
+    save();
+    renderPlan();
+  } else if (t.closest('.replace')) {
     replaceExercise(idx);
-  } else if (e.target.closest('.edit-note')) {
+  } else if (t.closest('.edit-note')) {
     item.noteOpen = true;
     save();
     renderPlan();
-    const ta = $(`.ex[data-i="${idx}"] .ex-note`);
+    const ta = $('.ex-note');
     if (ta) ta.focus();
-  } else if (e.target.closest('.note-done')) {
+  } else if (t.closest('.note-done')) {
     item.noteOpen = false;
     save();
     renderPlan();
-  } else if (e.target.closest('.remove')) {
+  } else if (t.closest('.remove')) {
     removeExercise(idx);
   }
 });
 
-// Запоминаем, раскрыт ли блок «Как делать» (чтобы не закрывался при отметке подхода)
+// Запоминаем, раскрыт ли блок «Как делать»
 root.addEventListener('toggle', e => {
   if (!plan || !e.target.classList || !e.target.classList.contains('tips')) return;
-  const item = plan.items[e.target.closest('.ex').dataset.i];
-  item.tipsOpen = e.target.open;
-  save();
+  const item = plan.items[plan.cur];
+  if (item) { item.tipsOpen = e.target.open; save(); }
 }, true);
+
+function completeSet(item, idx) {
+  const s = item.log.find(x => !x.done);
+  if (!s) return;
+  const weight = parseNum(s.weight);
+  const reps = parseInt(s.reps, 10);
+  if (!reps || reps <= 0) {
+    toast('Укажите, сколько повторов сделали');
+    return;
+  }
+  s.weight = weight ?? 0;
+  s.reps = reps;
+  s.done = true;
+  // Вес и повторы переносим в следующие подходы
+  item.log.forEach(x => { if (!x.done) { x.weight = s.weight; x.reps = s.reps; } });
+
+  if (plan.items.every(isDone)) {
+    save();
+    renderPlan();
+    stopTimer();
+    toast('Все подходы сделаны! Нажмите «Завершить тренировку» 💪', 5000);
+    return;
+  }
+  startTimer(item.rest);
+  if (isDone(item)) {
+    const next = nextUnfinished(idx);
+    toast(`Готово! Дальше: ${plan.items[next].name}`, 3500);
+    plan.cur = next;
+    save();
+    renderPlan();
+    window.scrollTo(0, 0);
+  } else {
+    save();
+    renderPlan();
+  }
+}
+
+function replaceExercise(idx) {
+  const item = plan.items[idx];
+  if (item.log.some(x => x.done)) {
+    toast('В этом упражнении уже есть подходы — заменить нельзя. Можно убрать его и добавить другое.', 5000);
+    return false;
+  }
+  const alts = item.alternatives || [];
+  if (!alts.length) {
+    toast('Нет других упражнений на эту группу мышц. Можно добавить любое через «Все упражнения».', 5000);
+    return false;
+  }
+  const [next, ...rest] = alts;
+  const old = { ...item };
+  delete old.alternatives;
+  delete old.log;
+  next.alternatives = [...rest, old];
+  initLog(next);
+  plan.items[idx] = next;
+  save();
+  renderPlan();
+  toast('Заменено на: ' + next.name);
+  return true;
+}
 
 function removeExercise(idx) {
   const item = plan.items[idx];
   const started = item.log.some(x => x.done);
-  if (started && !confirm(`Убрать «${item.name}»? Отмеченные подходы этого упражнения не сохранятся.`)) return;
+  if (started && !confirm(`Убрать «${item.name}»? Отмеченные подходы этого упражнения не сохранятся.`)) return false;
   plan.items.splice(idx, 1);
+  if (idx < plan.cur || plan.cur >= plan.items.length) plan.cur--;
+  if (!plan.items.length) plan.cur = -1;
   save();
   renderPlan();
   toast('Убрано: ' + item.name);
+  return true;
+}
+
+function moveExercise(idx, dir) {
+  const j = idx + dir;
+  if (j < 0 || j >= plan.items.length) return;
+  [plan.items[idx], plan.items[j]] = [plan.items[j], plan.items[idx]];
+  if (plan.cur === idx) plan.cur = j;
+  else if (plan.cur === j) plan.cur = idx;
+  save();
+  renderPlan();
+}
+
+// ---------- список всех упражнений: порядок, замена, удаление ----------
+
+function openOverview() {
+  let dlg = $('#overview-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'overview-dialog';
+    dlg.innerHTML = `<div class="dialog-body">
+        <h3>Упражнения плана</h3>
+        <p class="small muted" style="margin:4px 0 0">Стрелки меняют порядок. Нажмите на название, чтобы перейти.</p>
+        <div class="ov-list"></div>
+        <button class="btn ghost wide ov-add" type="button">＋ Добавить упражнение</button>
+        <button class="btn ghost wide danger ov-cancel" type="button">Отменить план</button>
+        <button class="btn primary wide ov-close" type="button">Закрыть</button>
+      </div>`;
+    document.body.appendChild(dlg);
+    dlg.addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const i = Number(b.dataset.i);
+      if (b.classList.contains('ov-close')) dlg.close();
+      else if (b.classList.contains('ov-add')) { dlg.close(); openAddDialog(); }
+      else if (b.classList.contains('ov-cancel')) { dlg.close(); cancelPlan(); }
+      else if (b.classList.contains('ov-go')) { dlg.close(); go(i); }
+      else if (b.classList.contains('ov-up')) { moveExercise(i, -1); fillOverview(dlg); }
+      else if (b.classList.contains('ov-down')) { moveExercise(i, 1); fillOverview(dlg); }
+      else if (b.classList.contains('ov-rep')) { replaceExercise(i); fillOverview(dlg); }
+      else if (b.classList.contains('ov-del')) { removeExercise(i); fillOverview(dlg); }
+    });
+  }
+  fillOverview(dlg);
+  dlg.showModal();
+}
+
+function fillOverview(dlg) {
+  if (!plan) { dlg.close(); return; }
+  const n = plan.items.length;
+  dlg.querySelector('.ov-list').innerHTML = `
+    <div class="ov-row ${plan.cur === -1 ? 'cur' : ''}">
+      <button class="ov-go" type="button" data-i="-1">Разминка<small>${plan.warmup_min} мин кардио</small></button>
+    </div>
+    ${plan.items.map((it, i) => {
+      const done = it.log.filter(s => s.done).length;
+      return `<div class="ov-row ${i === plan.cur ? 'cur' : ''} ${isDone(it) ? 'finished' : ''}">
+        <button class="ov-go" type="button" data-i="${i}">${i + 1}. ${esc(it.name)}
+          <small>${done ? `сделано ${done} из ${it.log.length}` : `${it.log.length} × ${it.rep_lo}–${it.rep_hi}`}</small></button>
+        <button class="icon-btn ov-up" type="button" data-i="${i}" aria-label="Выше" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="icon-btn ov-down" type="button" data-i="${i}" aria-label="Ниже" ${i === n - 1 ? 'disabled' : ''}>↓</button>
+        ${done ? '' : `<button class="icon-btn ov-rep" type="button" data-i="${i}" aria-label="Заменить">⟳</button>`}
+        <button class="icon-btn ov-del" type="button" data-i="${i}" aria-label="Убрать">✕</button>
+      </div>`;
+    }).join('')}`;
 }
 
 // ---------- добавить упражнение в план вручную ----------
 
 function openAddDialog() {
-  const pool = plan.pool;
-  if (!pool) {
+  if (!plan.pool) {
     toast('Этот план составлен старой версией. Составьте план заново, чтобы добавлять упражнения.', 5000);
     return;
   }
@@ -356,62 +615,13 @@ function addExercise(id) {
   item.alternatives = [];
   initLog(item);
   plan.items.push(item);
+  if (plan.cur >= 0 && isDone(plan.items[plan.cur])) plan.cur = plan.items.length - 1;
   save();
   renderPlan();
-  const cards = document.querySelectorAll('.ex');
-  cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
-  toast('Добавлено: ' + item.name);
+  toast(`Добавлено в конец: ${item.name}. Порядок — в «Все упражнения»`, 4000);
 }
 
-function toggleSet(item, j, row) {
-  const s = item.log[j];
-  if (s.done) {             // повторное нажатие — снять отметку и исправить
-    s.done = false;
-    save();
-    renderPlan();
-    return;
-  }
-  const weight = parseNum(row.querySelector('.w').value);
-  const reps = parseInt(row.querySelector('.r').value, 10);
-  if (!reps || reps <= 0) {
-    toast('Введите, сколько повторов сделали');
-    row.querySelector('.r').focus();
-    return;
-  }
-  s.weight = weight ?? 0;
-  s.reps = reps;
-  s.done = true;
-  // Подставим этот вес во все следующие подходы
-  item.log.slice(j + 1).forEach(next => { if (!next.done) next.weight = s.weight; });
-  save();
-  renderPlan();
-  const allDone = plan.items.every(i => i.log.every(x => x.done));
-  if (allDone) {
-    stopTimer();
-    toast('Все подходы сделаны! Нажмите «Завершить тренировку» 💪', 5000);
-  } else {
-    startTimer(item.rest);
-  }
-}
-
-function replaceExercise(idx) {
-  const item = plan.items[idx];
-  const alts = item.alternatives || [];
-  if (!alts.length) {
-    toast('Нет других упражнений на эту группу мышц. Добавьте их в разделе «Профиль → Тренажёры».', 5000);
-    return;
-  }
-  const [next, ...rest] = alts;
-  const old = { ...item };
-  delete old.alternatives;
-  delete old.log;
-  next.alternatives = [...rest, old];
-  initLog(next);
-  plan.items[idx] = next;
-  save();
-  renderPlan();
-  toast('Заменено на: ' + next.name);
-}
+// ---------- завершение ----------
 
 async function finishWorkout() {
   const sets = [];
@@ -435,6 +645,7 @@ async function finishWorkout() {
   store.set('pending', queue);
   clearPlan(true);
   await flushPending();
+  try { me = await api('GET', '/api/me'); store.set('me', me); } catch (e) { /* без связи */ }
   renderSetup(store.get('pending', []).length
     ? 'Тренировка сохранена в телефоне и отправится, когда появится интернет.'
     : 'Тренировка сохранена! Отличная работа 💪');
@@ -457,13 +668,13 @@ function clearPlan(silent) {
   if (!silent) { renderSetup(); window.scrollTo(0, 0); }
 }
 
-// ---------- таймер отдыха ----------
+// ---------- таймер отдыха (кольцо) ----------
 
 let timerEnd = store.get('timer_end');
+let timerTotal = store.get('timer_total', 90);
 let timerTick = null;
 let audioCtx = null;
-
-let timerTotal = store.get('timer_total', 90);
+const RING_C = 2 * Math.PI * 21;
 
 function startTimer(sec) {
   timerEnd = Date.now() + sec * 1000;
@@ -485,7 +696,8 @@ function runTimer() {
     const left = Math.ceil((timerEnd - Date.now()) / 1000);
     if (left <= 0) { timerDone(); return; }
     $('#timer-left').textContent = fmtSec(left);
-    $('#timer-bar').style.width = Math.min(100, left / timerTotal * 100) + '%';
+    const part = Math.min(1, left / timerTotal);
+    $('#timer-ring').setAttribute('stroke-dasharray', `${part * RING_C} ${RING_C}`);
   };
   update();
   timerTick = setInterval(update, 250);
@@ -495,7 +707,8 @@ function timerDone() {
   clearInterval(timerTick);
   timerEnd = null;
   store.del('timer_end');
-  $('#timer-left').textContent = 'Пора! 💪';
+  $('#timer-left').textContent = 'Пора!';
+  $('#timer-ring').setAttribute('stroke-dasharray', `0 ${RING_C}`);
   if (navigator.vibrate) navigator.vibrate([400, 200, 400]);
   beep();
   setTimeout(() => { if (!timerEnd) $('#timer').hidden = true; }, 4000);
@@ -529,8 +742,9 @@ $('#t-plus').addEventListener('click', () => {
     timerTotal += 30;
     store.set('timer_end', timerEnd);
     store.set('timer_total', timerTotal);
+  } else {
+    startTimer(30);
   }
-  else startTimer(30);
 });
 $('#t-skip').addEventListener('click', stopTimer);
 
