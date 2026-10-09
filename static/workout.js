@@ -118,7 +118,7 @@ function renderSetup(message) {
       <a href="/settings">Профиль</a> и вес в разделе <a href="/progress#body">Прогресс</a>.</div>` : ''}
     ${week && week.monday ? renderWeek(week) : ''}
 
-    <div class="hero today">
+    <div class="hero today-card">
       <div class="small muted">${choice.own ? 'Ваш выбор на сегодня' : 'Сегодня советуем'}</div>
       <div class="today-kind">${KINDS[choice.kind]}</div>
       <div class="small muted">${esc(KIND_HINTS[choice.kind])}${week && week.last

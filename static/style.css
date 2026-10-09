@@ -460,7 +460,7 @@ canvas.chart { width: 100%; height: 220px; display: block; }
 
 /* ---------- «Фокус»: главная ---------- */
 .week-line { display: flex; align-items: center; gap: 14px; color: inherit; text-decoration: none; margin-top: 4px; }
-.today { margin-top: 14px; padding: 18px 16px; }
+.today-card { margin-top: 14px; padding: 18px 16px; }
 .today-kind { font-size: 34px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 2px 0 4px; }
 .chips-row { display: flex; gap: 6px; margin-top: 14px; }
 .chip-btn {
@@ -468,12 +468,12 @@ canvas.chart { width: 100%; height: 220px; display: block; }
   color: var(--text); font: inherit; font-weight: 700;
 }
 .chip-btn.on { background: var(--text); color: var(--bg); }
-.today .btn.big { margin-top: 14px; }
+.today-card .btn.big { margin-top: 14px; }
 .link-btn {
   display: block; margin: 12px auto 0; padding: 6px 10px; border: 0; background: none;
   color: var(--muted); font: inherit; font-size: 15px; cursor: pointer;
 }
-.today .tiles { margin-top: 10px; }
+.today-card .tiles { margin-top: 10px; }
 a.profile-line { color: inherit; text-decoration: none; }
 
 /* ---------- «Фокус»: тренировка ---------- */
