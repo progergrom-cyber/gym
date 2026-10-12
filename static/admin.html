@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0c0f">
+  <meta name="robots" content="noindex">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <script>try{var t=JSON.parse(localStorage.getItem('gym_theme')||'null');if(t&&t!=='lime'){document.documentElement.dataset.theme=t;}}catch(e){}</script>
+  <link rel="stylesheet" href="/static/style.css?v=11">
+  <title>Админ-панель</title>
+</head>
+<body>
+  <header class="top">
+    <div><span class="eyebrow">Только для администратора</span><h1>Админ-панель</h1></div>
+    <span id="net" class="net" hidden>офлайн</span>
+  </header>
+  <main>
+    <div id="denied" hidden class="note warn">Эта страница только для администратора.
+      <a href="/settings">Назад в профиль</a></div>
+
+    <div id="panel" hidden>
+      <div class="seg tabs four" id="tabs">
+        <button type="button" data-tab="people" class="on">Люди</button>
+        <button type="button" data-tab="codes">Коды</button>
+        <button type="button" data-tab="log">Журнал</button>
+        <button type="button" data-tab="system">Система</button>
+      </div>
+
+      <section id="people"><div id="users"><p class="muted">Загрузка…</p></div></section>
+
+      <section id="codes" hidden>
+        <div class="card">
+          <h3>Новые инвайт-коды</h3>
+          <div class="small muted">Каждый код срабатывает один раз. Отправьте другу код и ссылку на сайт.</div>
+          <div class="chips-row" id="code-count">
+            <button type="button" class="chip-btn on" data-n="1">1</button>
+            <button type="button" class="chip-btn" data-n="3">3</button>
+            <button type="button" class="chip-btn" data-n="5">5</button>
+          </div>
+          <button class="btn primary wide" id="make-codes" type="button">Создать</button>
+          <div id="new-codes"></div>
+        </div>
+        <h2>Все коды</h2>
+        <div class="card" id="invites"></div>
+      </section>
+
+      <section id="log" hidden>
+        <p class="small muted">Кто и что менял в общем каталоге тренажёров (последние 200 правок).</p>
+        <div class="card" id="log-list"><p class="muted">Загрузка…</p></div>
+      </section>
+
+      <section id="system" hidden>
+        <div class="stats" id="sys-stats"></div>
+        <h2>Резервные копии</h2>
+        <div class="card">
+          <div class="small muted">Сохраняйте копию раз в неделю–месяц на телефон или компьютер.
+            В копии базы — все люди, тренировки, замеры и каталог. Если с сайтом что-то случится, по ней всё можно восстановить.</div>
+          <a class="btn primary wide" href="/api/admin/backup" download>⬇ Скачать копию базы</a>
+          <a class="btn ghost wide" href="/api/admin/photos.zip" download>⬇ Скачать все фото тренажёров</a>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="pw-dialog">
+    <div class="dialog-body">
+      <h3>Новый пароль</h3>
+      <p class="small muted">Передайте его человеку. Больше он нигде не показывается.
+        После входа пароль можно оставить или попросить сменить у администратора.</p>
+      <div class="secret" id="pw-value"></div>
+      <div class="dialog-actions">
+        <button class="btn ghost" type="button" id="pw-copy">Скопировать</button>
+        <button class="btn primary" type="button" id="pw-close">Готово</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/common.js?v=11"></script>
+  <script src="/static/admin.js?v=11"></script>
+</body>
+</html>

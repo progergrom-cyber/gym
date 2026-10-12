@@ -1,6 +1,7 @@
 """Работа с базой SQLite (файл gym.db рядом с кодом)."""
 import json
 import os
+import secrets
 import sqlite3
 
 from catalog_seed import SEED, V1_COUNT
@@ -94,6 +95,14 @@ CREATE TABLE IF NOT EXISTS reactions (
     emoji TEXT NOT NULL,
     PRIMARY KEY (workout_id, user_id, emoji)
 );
+CREATE TABLE IF NOT EXISTS catalog_log (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL,
+    exercise_id INTEGER,
+    exercise_name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS user_hidden (
     user_id INTEGER NOT NULL REFERENCES users(id),
     exercise_id INTEGER NOT NULL REFERENCES exercises(id),
@@ -118,6 +127,8 @@ def init_db(conn):
     add_column(conn, "exercises", "tips", "TEXT NOT NULL DEFAULT ''")
     add_column(conn, "users", "share", "INTEGER")
     add_column(conn, "workouts", "pair_id", "INTEGER")
+    add_column(conn, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
+    add_column(conn, "users", "blocked", "INTEGER NOT NULL DEFAULT 0")
     # Стартовый каталог. Каждое упражнение из SEED добавляется один раз:
     # новые версии приложения дополняют каталог, но не возвращают то,
     # что вы уже переименовали, и не трогают ваши правки.
@@ -276,3 +287,28 @@ def exercises_for(conn, user_id):
         e["active"] = e["club_active"] and e["mine"]
         out.append(e)
     return out
+
+
+INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих O/0, I/1
+
+
+def new_invite_code():
+    return "-".join("".join(secrets.choice(INVITE_ALPHABET) for _ in range(4))
+                    for _ in range(2))
+
+
+def log_catalog(conn, username, exercise_id, exercise_name, action):
+    """Запись в журнал изменений каталога (видна в админ-панели)."""
+    conn.execute("INSERT INTO catalog_log (username, exercise_id, exercise_name, action) "
+                 "VALUES (?,?,?,?)", (username, exercise_id, exercise_name, action))
+
+
+def delete_user(conn, user_id):
+    """Удалить пользователя и все его данные."""
+    conn.execute("DELETE FROM reactions WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM workouts WHERE user_id=?", (user_id,))   # подходы — каскадом
+    for table in ("measurements", "exercise_notes", "user_hidden"):
+        conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM pair_sessions WHERE host_id=? OR guest_id=?", (user_id, user_id))
+    conn.execute("DELETE FROM invites WHERE used_by=?", (user_id,))
+    conn.execute("DELETE FROM users WHERE id=?", (user_id,))

@@ -225,6 +225,78 @@ class AppTests(unittest.TestCase):
         r = b.post(f"/api/workouts/{wid}/react", json={"emoji": "🔥"}).get_json()["reactions"]
         self.assertEqual(r, [])
 
+    def test_admin_panel(self):
+        boss = new_client("boss")
+        user = new_client("vasya")
+        # Обычному пользователю — нельзя
+        self.assertEqual(boss.get("/api/admin/overview").status_code, 403)
+        conn = db.connect()
+        conn.execute("UPDATE users SET is_admin=1 WHERE username='boss'")
+        conn.commit()
+        vid = conn.execute("SELECT id FROM users WHERE username='vasya'").fetchone()[0]
+        conn.close()
+        self.assertTrue(boss.get("/api/me").get_json()["profile"]["is_admin"])
+        self.assertEqual(user.get("/api/admin/overview").status_code, 403)
+
+        ov = boss.get("/api/admin/overview").get_json()
+        self.assertIn("vasya", [u["username"] for u in ov["users"]])
+
+        codes = boss.post("/api/admin/invites", json={"count": 2}).get_json()["codes"]
+        self.assertEqual(len(codes), 2)
+        self.assertEqual(boss.delete(f"/api/admin/invites/{codes[0]}").status_code, 200)
+
+        # Сброс пароля: старый не подходит, временный — подходит
+        pw = boss.post(f"/api/admin/users/{vid}/password", json={}).get_json()["password"]
+        c = gym_app.app.test_client()
+        self.assertEqual(c.post("/api/login", json={"username": "vasya",
+                                                    "password": "secret123"}).status_code, 401)
+        self.assertEqual(c.post("/api/login", json={"username": "vasya",
+                                                    "password": pw}).status_code, 200)
+
+        # Блокировка: вход запрещён и текущая сессия перестаёт работать
+        boss.post(f"/api/admin/users/{vid}/block", json={"blocked": True})
+        self.assertEqual(c.get("/api/me").status_code, 401)
+        self.assertEqual(gym_app.app.test_client().post(
+            "/api/login", json={"username": "vasya", "password": pw}).status_code, 403)
+        boss.post(f"/api/admin/users/{vid}/block", json={"blocked": False})
+
+        # Себя заблокировать/удалить нельзя
+        bid = ov["me"]
+        self.assertEqual(boss.post(f"/api/admin/users/{bid}/block",
+                                   json={"blocked": True}).status_code, 400)
+
+        # Журнал каталога
+        eid = ex_id("Подъём на носки сидя")
+        ex = next(e for e in user.get("/api/exercises").get_json()["items"] if e["id"] == eid)
+        c.post("/api/login", json={"username": "vasya", "password": pw})
+        r = c.put(f"/api/exercises/{eid}", json=dict(ex, name="Икры сидя"))
+        self.assertEqual(r.status_code, 200)
+        log = boss.get("/api/admin/log").get_json()["items"]
+        self.assertEqual(log[0]["username"], "vasya")
+        self.assertIn("Икры сидя", log[0]["action"])
+
+        # Резервная копия — настоящий файл SQLite
+        r = boss.get("/api/admin/backup")
+        self.assertTrue(r.data.startswith(b"SQLite format 3"))
+        r.close()
+        r = boss.get("/api/admin/photos.zip")
+        self.assertEqual(r.status_code, 200)
+        r.close()
+
+        # Удаление: нужно подтверждение логином
+        finish(c, "2026-10-10", [{"exercise_id": eid, "set_no": 1, "weight": 40, "reps": 10}])
+        self.assertEqual(boss.post(f"/api/admin/users/{vid}/delete",
+                                   json={"confirm": "nope"}).status_code, 400)
+        self.assertEqual(boss.post(f"/api/admin/users/{vid}/delete",
+                                   json={"confirm": "vasya"}).status_code, 200)
+        conn = db.connect()
+        self.assertIsNone(conn.execute("SELECT 1 FROM users WHERE id=?", (vid,)).fetchone())
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM workouts WHERE user_id=?",
+                                      (vid,)).fetchone()[0], 0)
+        conn.execute("UPDATE exercises SET name='Подъём на носки сидя' WHERE id=?", (eid,))
+        conn.commit()
+        conn.close()
+
     def test_friends_page_served(self):
         c = gym_app.app.test_client()
         r = c.get("/friends")

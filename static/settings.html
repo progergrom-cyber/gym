@@ -8,7 +8,7 @@
   <link rel="icon" href="/static/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <script>try{var t=JSON.parse(localStorage.getItem('gym_theme')||'null');if(t&&t!=='lime'){document.documentElement.dataset.theme=t;}}catch(e){}</script>
-  <link rel="stylesheet" href="/static/style.css?v=10">
+  <link rel="stylesheet" href="/static/style.css?v=11">
   <title>Профиль</title>
 </head>
 <body>
@@ -59,6 +59,7 @@
       <h2>Аккаунт</h2>
       <div class="card">
         <div>Вы вошли как <b id="username"></b></div>
+        <a class="btn ghost wide" id="admin-link" href="/admin" hidden>🛠 Админ-панель</a>
         <button class="btn ghost danger wide" id="logout" type="button">Выйти</button>
       </div>
     </section>
@@ -117,7 +118,7 @@
     </form>
   </dialog>
 
-  <script src="/static/common.js?v=10"></script>
-  <script src="/static/settings.js?v=10"></script>
+  <script src="/static/common.js?v=11"></script>
+  <script src="/static/settings.js?v=11"></script>
 </body>
 </html>

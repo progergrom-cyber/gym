@@ -2,7 +2,7 @@
 // Service worker: сохраняет приложение в телефоне, чтобы оно открывалось без интернета.
 // При каждом обновлении приложения номер версии увеличивается — здесь и в
 // адресах файлов в .html (?v=...), чтобы телефоны точно скачали новые файлы.
-const VERSION = 'v10';
+const VERSION = 'v11';
 const STATIC_CACHE = 'gym-static-' + VERSION;
 const API_CACHE = 'gym-api';
 
@@ -54,6 +54,8 @@ async function networkFirst(request, cacheName, waitMs) {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Админ-панель и резервные копии — только напрямую с сервера, без сохранения в телефоне
+  if (url.pathname.startsWith('/api/admin/') || url.pathname === '/admin') return;
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(networkFirst(event.request, API_CACHE, 6000));
   } else {

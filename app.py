@@ -1,12 +1,16 @@
 """Сервер приложения «Тренер для зала» (Flask)."""
+import io
 import json
 import os
 import re
 import secrets
+import sqlite3
+import zipfile
 from datetime import date, timedelta
 from functools import wraps
 
-from flask import Flask, g, jsonify, request, send_from_directory, session
+from flask import (Flask, g, jsonify, request, send_file, send_from_directory,
+                   session)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import db
@@ -92,10 +96,20 @@ def login_required(fn):
             raise ApiError("Нужно войти", 401)
         user = get_db().execute("SELECT * FROM users WHERE id=?",
                                 (uid,)).fetchone()
-        if not user:
+        if not user or user["blocked"]:
             session.clear()
             raise ApiError("Нужно войти", 401)
         g.user = user
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def admin_required(fn):
+    @wraps(fn)
+    @login_required
+    def wrapper(*args, **kwargs):
+        if not g.user["is_admin"]:
+            raise ApiError("Только для администратора", 403)
         return fn(*args, **kwargs)
     return wrapper
 
@@ -129,6 +143,7 @@ def profile_dict(user):
         "freq": user["freq"],
         "injuries": json.loads(user["injuries"] or "[]"),
         "share": None if user["share"] is None else bool(user["share"]),
+        "is_admin": bool(user["is_admin"]),
     }
 
 
@@ -136,7 +151,7 @@ def profile_dict(user):
 
 PAGES = {"/": "index.html", "/progress": "progress.html",
          "/settings": "settings.html", "/login": "login.html",
-         "/friends": "friends.html"}
+         "/friends": "friends.html", "/admin": "admin.html"}
 
 
 def make_page_view(filename):
@@ -206,6 +221,8 @@ def login():
     if not user or not check_password_hash(user["password_hash"],
                                            data.get("password") or ""):
         raise ApiError("Неверный логин или пароль", 401)
+    if user["blocked"]:
+        raise ApiError("Аккаунт заблокирован. Напишите администратору", 403)
     session.clear()
     session.permanent = True
     session["uid"] = user["id"]
@@ -430,7 +447,9 @@ def toggle_mine(ex_id):
 @login_required
 def create_exercise():
     conn = get_db()
-    ex_id = db.save_exercise(conn, exercise_from_request(body()))
+    data = exercise_from_request(body())
+    ex_id = db.save_exercise(conn, data)
+    db.log_catalog(conn, g.user["username"], ex_id, data["name"], "добавил(а) упражнение")
     conn.commit()
     return jsonify(ok=True, id=ex_id)
 
@@ -439,12 +458,35 @@ def create_exercise():
 @login_required
 def update_exercise(ex_id):
     conn = get_db()
-    if not conn.execute("SELECT 1 FROM exercises WHERE id=?",
-                        (ex_id,)).fetchone():
+    old = conn.execute("SELECT * FROM exercises WHERE id=?", (ex_id,)).fetchone()
+    if not old:
         raise ApiError("Упражнение не найдено", 404)
-    db.save_exercise(conn, exercise_from_request(body()), ex_id)
+    data = exercise_from_request(body())
+    db.save_exercise(conn, data, ex_id)
+    changes = describe_changes(db.exercise_to_dict(old), data)
+    if changes:
+        db.log_catalog(conn, g.user["username"], ex_id, data["name"], changes)
     conn.commit()
     return jsonify(ok=True)
+
+
+FIELD_NAMES = {"equipment": "тренажёр", "muscle": "группу мышц", "target": "целевые мышцы",
+               "helpers": "вспомогательные", "kind": "тип", "region": "категорию",
+               "stress": "нагрузку на зоны", "tips": "советы «Как делать»"}
+
+
+def describe_changes(old, new):
+    """Человеческое описание правки упражнения для журнала."""
+    parts = []
+    if old["name"] != new["name"]:
+        parts.append(f"переименовал(а) «{old['name']}» → «{new['name']}»")
+    if old["active"] != new["active"]:
+        parts.append("вернул(а) в клуб" if new["active"] else "отметил(а) «нет в клубе»")
+    changed = [label for f, label in FIELD_NAMES.items()
+               if (old.get(f) or "") != (new.get(f) or "")]
+    if changed:
+        parts.append("изменил(а): " + ", ".join(changed))
+    return "; ".join(parts)
 
 
 def image_ext(data):
@@ -469,7 +511,7 @@ def remove_photo_file(name):
 @login_required
 def upload_photo(ex_id):
     conn = get_db()
-    row = conn.execute("SELECT photo FROM exercises WHERE id=?",
+    row = conn.execute("SELECT photo, name FROM exercises WHERE id=?",
                        (ex_id,)).fetchone()
     if not row:
         raise ApiError("Упражнение не найдено", 404)
@@ -484,6 +526,8 @@ def upload_photo(ex_id):
     with open(os.path.join(PHOTO_DIR, name), "wb") as out:
         out.write(data)
     conn.execute("UPDATE exercises SET photo=? WHERE id=?", (name, ex_id))
+    db.log_catalog(conn, g.user["username"], ex_id, row["name"],
+                   "заменил(а) фото" if row["photo"] else "добавил(а) фото")
     conn.commit()
     remove_photo_file(row["photo"])
     return jsonify(ok=True, photo_url="/static/photos/" + name)
@@ -493,14 +537,187 @@ def upload_photo(ex_id):
 @login_required
 def delete_photo(ex_id):
     conn = get_db()
-    row = conn.execute("SELECT photo FROM exercises WHERE id=?",
+    row = conn.execute("SELECT photo, name FROM exercises WHERE id=?",
                        (ex_id,)).fetchone()
     if not row:
         raise ApiError("Упражнение не найдено", 404)
     conn.execute("UPDATE exercises SET photo=NULL WHERE id=?", (ex_id,))
+    if row["photo"]:
+        db.log_catalog(conn, g.user["username"], ex_id, row["name"], "удалил(а) фото")
     conn.commit()
     remove_photo_file(row["photo"])
     return jsonify(ok=True)
+
+
+# ---------- админ-панель ----------
+
+def admin_target(conn, uid):
+    u = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not u:
+        raise ApiError("Пользователь не найден", 404)
+    if u["id"] == g.user["id"]:
+        raise ApiError("Это действие нельзя применить к себе")
+    return u
+
+
+def folder_size(path):
+    total = count = 0
+    for name in os.listdir(path):
+        full = os.path.join(path, name)
+        if os.path.isfile(full):
+            total += os.path.getsize(full)
+            count += 1
+    return total, count
+
+
+@app.get("/api/admin/overview")
+@admin_required
+def admin_overview():
+    conn = get_db()
+    users = conn.execute(
+        """
+        SELECT u.id, u.username, u.created_at, u.is_admin, u.blocked, u.share,
+          (SELECT COUNT(*) FROM workouts w WHERE w.user_id=u.id AND w.status='done') AS workouts,
+          (SELECT MAX(date) FROM workouts w WHERE w.user_id=u.id AND w.status='done') AS last_date,
+          (SELECT code FROM invites i WHERE i.used_by=u.id) AS invite
+        FROM users u ORDER BY u.id
+        """).fetchall()
+    invites = conn.execute(
+        "SELECT i.code, i.created_at, i.used_at, u.username FROM invites i "
+        "LEFT JOIN users u ON u.id = i.used_by ORDER BY i.used_by IS NOT NULL, i.created_at DESC"
+    ).fetchall()
+    photos_size, photos_count = folder_size(PHOTO_DIR)
+    week_ago = (date.today() - timedelta(days=7)).isoformat()
+    one = lambda sql, *a: conn.execute(sql, a).fetchone()[0]  # noqa: E731
+    return jsonify(
+        me=g.user["id"],
+        users=[dict(u) for u in users],
+        invites=[dict(i) for i in invites],
+        system={
+            "users": len(users),
+            "workouts": one("SELECT COUNT(*) FROM workouts WHERE status='done'"),
+            "workouts_week": one("SELECT COUNT(*) FROM workouts WHERE status='done' AND date >= ?",
+                                 week_ago),
+            "sets": one("SELECT COUNT(*) FROM sets"),
+            "exercises": one("SELECT COUNT(*) FROM exercises"),
+            "db_size": os.path.getsize(db.DB_PATH) if os.path.exists(db.DB_PATH) else 0,
+            "photos_size": photos_size,
+            "photos": photos_count,
+        })
+
+
+@app.post("/api/admin/invites")
+@admin_required
+def admin_create_invites():
+    try:
+        count = max(1, min(20, int(body().get("count") or 1)))
+    except (TypeError, ValueError):
+        count = 1
+    conn = get_db()
+    codes = []
+    for _ in range(count):
+        code = db.new_invite_code()
+        conn.execute("INSERT INTO invites (code) VALUES (?)", (code,))
+        codes.append(code)
+    conn.commit()
+    return jsonify(codes=codes)
+
+
+@app.delete("/api/admin/invites/<code>")
+@admin_required
+def admin_delete_invite(code):
+    conn = get_db()
+    cur = conn.execute("DELETE FROM invites WHERE code=? AND used_by IS NULL", (code,))
+    conn.commit()
+    if not cur.rowcount:
+        raise ApiError("Код не найден или уже использован", 404)
+    return jsonify(ok=True)
+
+
+@app.post("/api/admin/users/<int:uid>/password")
+@admin_required
+def admin_reset_password(uid):
+    conn = get_db()
+    admin_target(conn, uid)
+    # Временный пароль без похожих символов — его продиктуют/перешлют другу
+    password = "".join(secrets.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(8))
+    conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                 (generate_password_hash(password), uid))
+    conn.commit()
+    return jsonify(password=password)
+
+
+@app.post("/api/admin/users/<int:uid>/block")
+@admin_required
+def admin_block(uid):
+    conn = get_db()
+    admin_target(conn, uid)
+    blocked = bool(body().get("blocked"))
+    conn.execute("UPDATE users SET blocked=? WHERE id=?", (1 if blocked else 0, uid))
+    conn.commit()
+    return jsonify(ok=True, blocked=blocked)
+
+
+@app.post("/api/admin/users/<int:uid>/admin")
+@admin_required
+def admin_set_admin(uid):
+    conn = get_db()
+    admin_target(conn, uid)
+    is_admin = bool(body().get("admin"))
+    conn.execute("UPDATE users SET is_admin=? WHERE id=?", (1 if is_admin else 0, uid))
+    conn.commit()
+    return jsonify(ok=True, admin=is_admin)
+
+
+@app.post("/api/admin/users/<int:uid>/delete")
+@admin_required
+def admin_delete_user(uid):
+    conn = get_db()
+    u = admin_target(conn, uid)
+    if (body().get("confirm") or "").strip() != u["username"]:
+        raise ApiError("Для подтверждения введите логин пользователя точно")
+    db.delete_user(conn, uid)
+    conn.commit()
+    return jsonify(ok=True)
+
+
+@app.get("/api/admin/log")
+@admin_required
+def admin_log():
+    rows = get_db().execute("SELECT * FROM catalog_log ORDER BY id DESC LIMIT 200").fetchall()
+    return jsonify(items=[dict(r) for r in rows])
+
+
+@app.get("/api/admin/backup")
+@admin_required
+def admin_backup():
+    """Скачать копию базы (безопасно даже во время работы сайта)."""
+    tmp = os.path.join(BASE_DIR, f".backup-{secrets.token_hex(4)}.db")
+    try:
+        dst = sqlite3.connect(tmp)
+        get_db().backup(dst)
+        dst.close()
+        with open(tmp, "rb") as f:
+            data = io.BytesIO(f.read())
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return send_file(data, mimetype="application/octet-stream", as_attachment=True,
+                     download_name=f"gym-backup-{date.today().isoformat()}.db")
+
+
+@app.get("/api/admin/photos.zip")
+@admin_required
+def admin_photos():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        for name in sorted(os.listdir(PHOTO_DIR)):
+            full = os.path.join(PHOTO_DIR, name)
+            if os.path.isfile(full):
+                z.write(full, name)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"gym-photos-{date.today().isoformat()}.zip")
 
 
 # ---------- план и дневник ----------

@@ -5,22 +5,15 @@
     python3 manage.py invites         — показать все коды
     python3 manage.py users           — показать пользователей
     python3 manage.py password ЛОГИН  — задать новый пароль пользователю
+    python3 manage.py admin ЛОГИН     — сделать администратором (админ-панель)
+    python3 manage.py unadmin ЛОГИН   — убрать права администратора
 """
 import getpass
-import secrets
 import sys
 
 from werkzeug.security import generate_password_hash
 
 import db
-
-ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих O/0, I/1
-
-
-def new_code():
-    return "-".join("".join(secrets.choice(ALPHABET) for _ in range(4))
-                    for _ in range(2))
-
 
 def main(args):
     conn = db.connect()
@@ -30,7 +23,7 @@ def main(args):
     if cmd == "invite":
         count = int(args[1]) if len(args) > 1 else 1
         for _ in range(count):
-            code = new_code()
+            code = db.new_invite_code()
             conn.execute("INSERT INTO invites (code) VALUES (?)", (code,))
             print("Инвайт-код:", code)
         conn.commit()
@@ -42,8 +35,19 @@ def main(args):
                 else "свободен"
             print(r["code"], r["created_at"], status)
     elif cmd == "users":
-        for r in conn.execute("SELECT id, username, created_at FROM users"):
-            print(r["id"], r["username"], r["created_at"])
+        for r in conn.execute("SELECT id, username, created_at, is_admin FROM users"):
+            print(r["id"], r["username"], r["created_at"],
+                  "(админ)" if r["is_admin"] else "")
+    elif cmd in ("admin", "unadmin") and len(args) > 1:
+        cur = conn.execute("UPDATE users SET is_admin=? WHERE username=?",
+                           (1 if cmd == "admin" else 0, args[1]))
+        conn.commit()
+        if not cur.rowcount:
+            print("Нет такого пользователя")
+        elif cmd == "admin":
+            print(f"{args[1]} теперь администратор. Админ-панель: Профиль → Админ-панель")
+        else:
+            print(f"{args[1]} больше не администратор")
     elif cmd == "password" and len(args) > 1:
         user = conn.execute("SELECT id FROM users WHERE username=?",
                             (args[1],)).fetchone()

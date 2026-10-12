@@ -42,6 +42,7 @@ function fillProfile(p) {
     b.classList.toggle('on', Number(b.dataset.v) === p.freq));
   f.querySelectorAll('[name=injury]').forEach(c => { c.checked = p.injuries.includes(c.value); });
   $('#username').textContent = p.username;
+  $('#admin-link').hidden = !p.is_admin;
 }
 
 $('#p-form').addEventListener('submit', async e => {

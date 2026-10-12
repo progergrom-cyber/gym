@@ -638,3 +638,14 @@ a.profile-line { color: inherit; text-decoration: none; }
 .react-chip { padding: 4px 10px; border-radius: 99px; background: var(--surface-2); font-size: 15px; }
 .react-names { flex-basis: 100%; }
 .invite .dialog-actions .btn.ghost { flex: 0 0 auto; }
+
+/* ---------- Админ-панель ---------- */
+.admin-user.blocked { opacity: .6; }
+.admin-user .chip { margin-left: 4px; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .05em; }
+.secret {
+  margin: 10px 0; padding: 12px; border-radius: 12px; background: var(--surface-2); color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 22px; font-weight: 700;
+  letter-spacing: .08em; text-align: center; user-select: all;
+}
+a.btn.wide { display: flex; }
