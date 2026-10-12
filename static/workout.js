@@ -87,8 +87,13 @@ function renderLast(last) {
       <div class="small muted">Прошлая тренировка · ${esc(fmtDate(last.date))}</div>
       <div class="last-title"><b>${esc(last.kind_label)}</b>
         <span class="muted small">${last.exercises} упр. · ${last.sets} подх. · ${fmtKg(last.volume)}</span></div>
+      ${last.partner ? `<div class="small muted">👥 вместе с ${esc(last.partner)}</div>` : ''}
       ${last.records.map(r => `<div class="record">⭐ Рекорд: ${esc(r.name)} — <b>${fmtNum(r.weight)} кг</b>
         <span class="muted">(было ${fmtNum(r.prev)})</span></div>`).join('')}
+      ${(last.reactions || []).length ? `<div class="react-row">${last.reactions.map(r =>
+        `<span class="react-chip" title="${esc(r.names.join(', '))}">${r.emoji} ${r.count}</span>`).join('')}
+        <span class="small muted">${esc(last.reactions.flatMap(r => r.names).filter((n, i, a) => a.indexOf(n) === i).join(', '))}</span>
+      </div>` : ''}
     </a>`;
 }
 
@@ -116,6 +121,15 @@ function renderSetup(message) {
     ${message ? `<div class="note ok">${esc(message)}</div>` : ''}
     ${needProfile ? `<div class="note warn">Заполните рост в разделе
       <a href="/settings">Профиль</a> и вес в разделе <a href="/progress#body">Прогресс</a>.</div>` : ''}
+    ${me && me.pair_invite ? `<div class="card invite">
+      <div><b>👥 ${esc(me.pair_invite.host)}</b> зовёт тренироваться вдвоём</div>
+      <div class="small muted">${esc(me.pair_invite.kind_label)} · ${me.pair_invite.minutes} мин ·
+        те же упражнения, но ваши подходы и веса</div>
+      <div class="dialog-actions">
+        <button class="btn ghost" type="button" id="pair-decline">Не сейчас</button>
+        <button class="btn primary" type="button" id="pair-join">Присоединиться</button>
+      </div>
+    </div>` : ''}
     ${week && week.monday ? renderWeek(week) : ''}
 
     <div class="hero today-card">
@@ -129,6 +143,13 @@ function renderSetup(message) {
       </div>
       <button class="btn primary big" id="make" type="button">Начать</button>
       <button class="link-btn" id="other-kind" type="button">другой тип тренировки ›</button>
+      <button class="link-btn" id="pair-open" type="button">👥 тренироваться вдвоём ›</button>
+      <div id="pair-box" hidden>
+        <div class="small muted" style="margin-top:6px">С кем идёте? Друг получит приглашение
+          на главной. План будет из упражнений, которые подходят вам обоим.</div>
+        <div class="chips-row wrap" id="pair-users"><span class="small muted">Загрузка…</span></div>
+        <button class="btn primary wide" id="pair-invite" type="button" hidden></button>
+      </div>
       <div class="tiles two" id="kind" hidden>
         ${Object.entries(KINDS).map(([k, label]) => `<button type="button" data-v="${k}"
           class="tile ${k === choice.kind ? 'on' : ''}"><b>${label}</b><small>${KIND_HINTS[k]}</small></button>`).join('')}
@@ -169,6 +190,121 @@ function renderSetup(message) {
     renderSetup();
   });
   $('#make').addEventListener('click', makePlan);
+
+  $('#pair-open').addEventListener('click', async () => {
+    const box = $('#pair-box');
+    box.hidden = !box.hidden;
+    if (box.hidden) return;
+    try {
+      const { items } = await api('GET', '/api/users');
+      $('#pair-users').innerHTML = items.length
+        ? items.map(u => `<button type="button" class="chip-btn" data-user="${esc(u)}">${esc(u)}</button>`).join('')
+        : '<span class="small muted">Пока больше никого нет — пригласите друзей кодом.</span>';
+    } catch (e) {
+      $('#pair-users').innerHTML = `<span class="small muted">${esc(e.message)}</span>`;
+    }
+  });
+  $('#pair-users').addEventListener('click', e => {
+    const b = e.target.closest('[data-user]');
+    if (!b) return;
+    $('#pair-users').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    const btn = $('#pair-invite');
+    btn.hidden = false;
+    btn.dataset.user = b.dataset.user;
+    btn.textContent = 'Позвать и начать';
+  });
+  $('#pair-invite').addEventListener('click', invitePartner);
+  if ($('#pair-join')) {
+    $('#pair-join').addEventListener('click', joinPair);
+    $('#pair-decline').addEventListener('click', async () => {
+      try { await api('POST', `/api/pair/${me.pair_invite.id}/decline`, {}); } catch (e) { /* не страшно */ }
+      me.pair_invite = null;
+      renderSetup();
+    });
+  }
+}
+
+function startPlan(p) {
+  plan = p;
+  plan.items.forEach(initLog);
+  plan.cur = -1;          // начинаем с разминки
+  save();
+  renderPlan();
+  window.scrollTo(0, 0);
+}
+
+async function invitePartner() {
+  const btn = $('#pair-invite');
+  const choice = currentChoice();
+  btn.disabled = true;
+  btn.textContent = 'Составляю общий план…';
+  try {
+    await flushPending();
+    const res = await api('POST', '/api/pair', {
+      partner: btn.dataset.user, minutes: choice.minutes, kind: choice.kind, date: todayISO(),
+    });
+    startPlan(res.plan);
+    toast(`${res.plan.pair.partner} увидит приглашение у себя на главной`, 5000);
+  } catch (e) {
+    toast(e.message, 4000);
+    btn.disabled = false;
+    btn.textContent = 'Позвать и начать';
+  }
+}
+
+async function joinPair() {
+  const btn = $('#pair-join');
+  btn.disabled = true;
+  btn.textContent = 'Загружаю план…';
+  try {
+    await flushPending();
+    const res = await api('POST', `/api/pair/${me.pair_invite.id}/join`, { date: todayISO() });
+    me.pair_invite = null;
+    startPlan(res.plan);
+  } catch (e) {
+    toast(e.message, 4000);
+    btn.disabled = false;
+    btn.textContent = 'Присоединиться';
+  }
+}
+
+// ---------- прогресс партнёра (тренировка вдвоём) ----------
+
+let pairSyncAt = 0;
+async function syncPair(force) {
+  if (!plan || !plan.pair || !navigator.onLine) return;
+  if (!force && Date.now() - pairSyncAt < 15000) { showPair(); return; }
+  pairSyncAt = Date.now();
+  const total = plan.items.reduce((n, i) => n + i.log.length, 0);
+  const done = plan.items.reduce((n, i) => n + i.log.filter(s => s.done).length, 0);
+  const cur = plan.items[plan.cur];
+  try {
+    const res = await api('PUT', `/api/pair/${plan.pair.id}/progress`, {
+      cur: plan.cur + 1, count: plan.items.length, name: cur ? cur.name : 'Разминка', done, total,
+    });
+    if (!plan || !plan.pair) return;
+    plan.pair.status = res.status;
+    plan.pair.progress = res.partner;
+    save();
+    showPair();
+  } catch (e) { /* без связи — покажем, что знали */ }
+}
+
+function showPair() {
+  const el = $('#pair-line');
+  if (!el || !plan || !plan.pair) return;
+  const p = plan.pair.progress;
+  const name = esc(plan.pair.partner);
+  if (p) {
+    el.innerHTML = `👥 <b>${name}</b>: ${p.cur > 0 ? `упражнение ${p.cur} из ${p.count}` : 'разминка'}
+      · ${p.done}/${p.total} подходов`;
+  } else if (plan.pair.status === 'declined') {
+    el.innerHTML = `👥 <b>${name}</b>: «не сейчас» — тренируйтесь в своём темпе`;
+  } else {
+    el.innerHTML = plan.pair.role === 'host'
+      ? `👥 Приглашение отправлено: <b>${name}</b>. Ждём, когда присоединится`
+      : `👥 Вместе с: <b>${name}</b>`;
+  }
 }
 
 async function makePlan() {
@@ -180,12 +316,7 @@ async function makePlan() {
     await flushPending();  // сначала отправим прошлую тренировку, если она ждёт
     const res = await api('POST', '/api/plan',
       { minutes: choice.minutes, kind: choice.kind, date: todayISO() });
-    plan = res.plan;
-    plan.items.forEach(initLog);
-    plan.cur = -1;          // начинаем с разминки
-    save();
-    renderPlan();
-    window.scrollTo(0, 0);
+    startPlan(res.plan);
   } catch (e) {
     toast(e.message, 4000);
     btn.disabled = false;
@@ -362,9 +493,12 @@ function renderPlan() {
       ${progressBar()}
       <button class="btn small ghost" type="button" id="overview">☰ Все упражнения</button>
     </div>
+    ${plan.pair ? '<div class="pair-line" id="pair-line"></div>' : ''}
     ${plan.cur < 0 ? renderWarmup() : renderExercise(plan.cur)}`;
   const fin = $('#finish');
   if (fin) fin.addEventListener('click', finishWorkout);
+  showPair();
+  syncPair();
   keepScreenOn();
 }
 
@@ -477,6 +611,7 @@ function completeSet(item, idx) {
     return;
   }
   startTimer(item.rest);
+  pairSyncAt = 0;
   if (isDone(item)) {
     const next = nextUnfinished(idx);
     toast(`Готово! Дальше: ${plan.items[next].name}`, 3500);
@@ -677,7 +812,7 @@ async function finishWorkout() {
     workout_id: plan.workout_id,
     payload: {
       date: plan.date, kind: plan.kind, minutes: plan.minutes, sets,
-      notes: plan.notes || {},
+      notes: plan.notes || {}, pair_id: plan.pair ? plan.pair.id : null,
     },
   });
   store.set('pending', queue);

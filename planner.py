@@ -298,25 +298,12 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
         warnings.append("В плане есть грудь, но нет спины — "
                         "баланс нарушен. Добавьте упражнение на спину.")
 
-    # Кардио-тренажёр для разминки
-    cardio = [e for e in exercises if e.get("active", True)
-              and e["muscle"] == "cardio" and not risky_zones(e, injuries)]
-    rng.shuffle(cardio)
-    warmup = [{"name": e["name"], "equipment": e.get("equipment", ""),
-               "photo": e.get("photo_url")} for e in cardio]
+    warmup = _warmup(exercises, injuries, rng)
 
     total = WARMUP_SEC + sum(i["seconds"] for i in items)
     if items and total < budget - 15 * 60:
         warnings.append(f"План занимает около {round(total / 60)} мин из "
                         f"{minutes}: в каталоге мало подходящих упражнений.")
-    # Все включённые силовые упражнения — чтобы добавить в план вручную
-    # (работает и без интернета). Порядок — как в списке групп мышц.
-    order_m = list(MUSCLES)
-    pool = sorted((e for e in exercises
-                   if e.get("club_active", e.get("active", True))
-                   and e["muscle"] in MUSCLES and e["muscle"] != "cardio"),
-                  key=lambda e: (order_m.index(e["muscle"]), e["name"]))
-
     return {
         "kind": kind,
         "kind_label": KINDS[kind],
@@ -327,6 +314,66 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
         "items": items,
         "warnings": warnings,
         "gaps": gaps,
-        "pool": [dict(_item(e, profile, minutes, history, 0, notes),
-                      off=not e.get("mine", True)) for e in pool],
+        "pool": _pool(exercises, profile, minutes, history, notes),
+    }
+
+
+def _warmup(exercises, injuries, rng):
+    """Кардио-тренажёры для разминки (в случайном порядке)."""
+    cardio = [e for e in exercises if e.get("active", True)
+              and e["muscle"] == "cardio" and not risky_zones(e, injuries)]
+    rng.shuffle(cardio)
+    return [{"name": e["name"], "equipment": e.get("equipment", ""),
+             "photo": e.get("photo_url")} for e in cardio]
+
+
+def _pool(exercises, profile, minutes, history, notes):
+    """Все силовые упражнения клуба — чтобы добавить в план вручную
+    (работает и без интернета). Порядок — как в списке групп мышц."""
+    order_m = list(MUSCLES)
+    pool = sorted((e for e in exercises
+                   if e.get("club_active", e.get("active", True))
+                   and e["muscle"] in MUSCLES and e["muscle"] != "cardio"),
+                  key=lambda e: (order_m.index(e["muscle"]), e["name"]))
+    return [dict(_item(e, profile, minutes, history, 0, notes),
+                 off=not e.get("mine", True)) for e in pool]
+
+
+def plan_from_ids(exercises, profile, minutes, kind, ex_ids, history=None,
+                  notes=None, seed=None):
+    """План из готового списка упражнений (для тренировки вдвоём):
+    упражнения и порядок общие, а подходы, повторы и подсказки веса — свои."""
+    rng = random.Random(seed)
+    history = history or {}
+    injuries = set(profile.get("injuries") or [])
+    by_id = {e["id"]: e for e in exercises}
+    chosen = [by_id[i] for i in ex_ids if i in by_id]
+    used = {e["id"] for e in chosen}
+    usable = [e for e in exercises if e.get("active", True)
+              and e["muscle"] in MUSCLES and e["muscle"] != "cardio"
+              and not risky_zones(e, injuries)]
+    items = []
+    for ex in chosen:
+        item = _item(ex, profile, minutes, history, 0, notes)
+        alts = [a for a in usable if a["muscle"] == ex["muscle"] and a["id"] not in used]
+        rng.shuffle(alts)
+        item["alternatives"] = [_item(a, profile, minutes, history, 0, notes)
+                                for a in alts]
+        items.append(item)
+    warnings = []
+    risky = [i["name"] for i in items if i["risky"]]
+    if risky:
+        warnings.append("Осторожно, нагружают ваши проблемные зоны: "
+                        + ", ".join(risky) + ". Можно заменить.")
+    return {
+        "kind": kind,
+        "kind_label": KINDS[kind],
+        "minutes": minutes,
+        "warmup_min": WARMUP_SEC // 60,
+        "warmup": _warmup(exercises, injuries, rng),
+        "total_seconds": WARMUP_SEC + sum(i["seconds"] for i in items),
+        "items": items,
+        "warnings": warnings,
+        "gaps": [],
+        "pool": _pool(exercises, profile, minutes, history, notes),
     }

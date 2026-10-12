@@ -78,6 +78,7 @@ function renderFeed() {
         </div>
         <span class="chip">${esc(w.kind_label)}</span>
       </div>
+      ${w.partner ? `<div class="small muted" style="margin-top:6px">👥 вместе с ${esc(w.partner)}</div>` : ''}
       <div class="feed-stats">
         <span><b>${w.exercises}</b> упр.</span>
         <span><b>${w.sets}</b> подходов</span>
@@ -85,8 +86,36 @@ function renderFeed() {
       </div>
       ${w.records.map(r => `<div class="record">⭐ Рекорд: ${esc(r.name)} —
         <b>${fmtNum(r.weight)} кг</b> <span class="muted">(было ${fmtNum(r.prev)})</span></div>`).join('')}
+      <div class="react-row" data-wid="${w.id}">${reactRow(w)}</div>
     </article>`).join('');
 }
+
+function reactRow(w) {
+  const by = Object.fromEntries((w.reactions || []).map(r => [r.emoji, r]));
+  const names = [...new Set((w.reactions || []).flatMap(r => r.names))];
+  return (data.emojis || []).map(e => {
+    const r = by[e];
+    return `<button type="button" class="react-btn ${r && r.mine ? 'mine' : ''}" data-emoji="${e}"
+      title="${r ? esc(r.names.join(', ')) : ''}" aria-pressed="${!!(r && r.mine)}"
+      aria-label="Реакция ${e}${r ? ', ' + r.count : ''}">${e}${r ? ` <span>${r.count}</span>` : ''}</button>`;
+  }).join('') + (names.length ? `<span class="small muted react-names">${esc(names.join(', '))}</span>` : '');
+}
+
+$('#feed').addEventListener('click', async e => {
+  const b = e.target.closest('.react-btn');
+  if (!b) return;
+  const row = b.closest('.react-row');
+  const w = data.feed.find(x => String(x.id) === row.dataset.wid);
+  b.disabled = true;
+  try {
+    const res = await api('POST', `/api/workouts/${w.id}/react`, { emoji: b.dataset.emoji });
+    w.reactions = res.reactions;
+    row.innerHTML = reactRow(w);
+  } catch (err) {
+    toast(err.message);
+    b.disabled = false;
+  }
+});
 
 // ---------- рейтинг ----------
 

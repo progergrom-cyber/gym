@@ -161,6 +161,70 @@ class AppTests(unittest.TestCase):
         self.assertEqual(week["suggest"], "lower")
         self.assertEqual(week["last"]["kind_label"], "Верх")
 
+    def test_pair_workout(self):
+        host = new_client("pasha")
+        guest = new_client("rita")
+        # Рита выключила себе жим ногами — в общем плане его быть не должно
+        leg_press = ex_id("Жим ногами")
+        guest.put(f"/api/exercises/{leg_press}/mine", json={"enabled": False})
+        r = host.post("/api/pair", json={"partner": "rita", "minutes": 60, "kind": "lower"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        hplan = r.get_json()["plan"]
+        ids = [i["exercise_id"] for i in hplan["items"]]
+        self.assertTrue(ids)
+        self.assertNotIn(leg_press, ids)
+        self.assertEqual(hplan["pair"]["partner"], "rita")
+
+        invite = guest.get("/api/me").get_json()["pair_invite"]
+        self.assertEqual(invite["host"], "pasha")
+        gplan = guest.post(f"/api/pair/{invite['id']}/join", json={}).get_json()["plan"]
+        self.assertEqual([i["exercise_id"] for i in gplan["items"]], ids)   # тот же порядок
+        self.assertEqual(gplan["pair"]["partner"], "pasha")
+        self.assertIsNone(guest.get("/api/me").get_json()["pair_invite"])
+
+        # Прогресс: каждый видит прогресс другого
+        host.put(f"/api/pair/{invite['id']}/progress",
+                 json={"cur": 2, "count": len(ids), "name": "Тяга", "done": 5, "total": 20})
+        got = guest.put(f"/api/pair/{invite['id']}/progress",
+                        json={"cur": 1, "count": len(ids), "name": "Мост", "done": 2,
+                              "total": 18}).get_json()
+        self.assertEqual(got["partner"]["done"], 5)
+
+        # Чужой не может подглядеть
+        stranger = new_client("sava")
+        self.assertEqual(stranger.put(f"/api/pair/{invite['id']}/progress",
+                                      json={}).status_code, 404)
+
+        # Завершаем — в ленте видно «вместе с»
+        sets = [{"exercise_id": ids[0], "set_no": 1, "weight": 40, "reps": 10}]
+        for c, plan in ((host, hplan), (guest, gplan)):
+            c.post(f"/api/workouts/{plan['workout_id']}/finish",
+                   json={"date": "2026-10-12", "kind": "lower", "minutes": 60, "sets": sets})
+            c.put("/api/friends/share", json={"share": True})
+        feed = host.get("/api/friends").get_json()["feed"]
+        rita = next(w for w in feed if w["username"] == "rita")
+        self.assertEqual(rita["partner"], "pasha")
+        self.assertEqual(host.get("/api/me").get_json()["week"]["last"]["partner"], "rita")
+
+    def test_reactions(self):
+        a = new_client("tima")
+        b = new_client("ula")
+        press = ex_id("Жим от груди")
+        finish(a, "2026-10-10", [{"exercise_id": press, "set_no": 1, "weight": 40, "reps": 10}])
+        wid = a.get("/api/workouts").get_json()["items"][0]["id"]
+        # Тима ещё не делится — Уля не может реагировать
+        self.assertEqual(b.post(f"/api/workouts/{wid}/react", json={"emoji": "🔥"}).status_code, 404)
+        a.put("/api/friends/share", json={"share": True})
+        r = b.post(f"/api/workouts/{wid}/react", json={"emoji": "🔥"}).get_json()["reactions"]
+        self.assertEqual((r[0]["emoji"], r[0]["count"], r[0]["mine"]), ("🔥", 1, True))
+        self.assertEqual(b.post(f"/api/workouts/{wid}/react",
+                                json={"emoji": "😈"}).status_code, 400)
+        last = a.get("/api/me").get_json()["week"]["last"]
+        self.assertEqual(last["reactions"][0]["names"], ["ula"])
+        # повторное нажатие снимает
+        r = b.post(f"/api/workouts/{wid}/react", json={"emoji": "🔥"}).get_json()["reactions"]
+        self.assertEqual(r, [])
+
     def test_friends_page_served(self):
         c = gym_app.app.test_client()
         r = c.get("/friends")

@@ -75,6 +75,25 @@ CREATE TABLE IF NOT EXISTS exercise_notes (
     PRIMARY KEY (user_id, exercise_id)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS pair_sessions (
+    id INTEGER PRIMARY KEY,
+    host_id INTEGER NOT NULL REFERENCES users(id),
+    guest_id INTEGER NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL,
+    minutes INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    ex_ids TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'invited',
+    host_progress TEXT,
+    guest_progress TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS reactions (
+    workout_id INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    emoji TEXT NOT NULL,
+    PRIMARY KEY (workout_id, user_id, emoji)
+);
 CREATE TABLE IF NOT EXISTS user_hidden (
     user_id INTEGER NOT NULL REFERENCES users(id),
     exercise_id INTEGER NOT NULL REFERENCES exercises(id),
@@ -98,6 +117,7 @@ def init_db(conn):
     add_column(conn, "exercises", "photo", "TEXT")
     add_column(conn, "exercises", "tips", "TEXT NOT NULL DEFAULT ''")
     add_column(conn, "users", "share", "INTEGER")
+    add_column(conn, "workouts", "pair_id", "INTEGER")
     # Стартовый каталог. Каждое упражнение из SEED добавляется один раз:
     # новые версии приложения дополняют каталог, но не возвращают то,
     # что вы уже переименовали, и не трогают ваши правки.
