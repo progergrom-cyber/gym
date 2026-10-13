@@ -7,3 +7,4 @@ __pycache__/
 .claude/
 static/photos/
 .backup-*.db
+*.zip
