@@ -649,3 +649,8 @@ a.profile-line { color: inherit; text-decoration: none; }
   letter-spacing: .08em; text-align: center; user-select: all;
 }
 a.btn.wide { display: flex; }
+
+/* ---------- Переключатель вида плана ---------- */
+.view-switch { margin-bottom: 12px; }
+.view-switch button { min-height: 40px; font-size: 15px; }
+.pair-line > div + div { margin-top: 4px; }

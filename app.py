@@ -244,13 +244,18 @@ def me():
     has_weight = conn.execute("SELECT 1 FROM measurements WHERE user_id=?",
                               (g.user["id"],)).fetchone() is not None
     invite = conn.execute(
-        "SELECT p.id, p.kind, p.minutes, u.username FROM pair_sessions p "
-        "JOIN users u ON u.id = p.host_id WHERE p.guest_id=? AND p.status='invited' "
+        "SELECT p.id, p.host_id, p.kind, p.minutes, u.username FROM pair_members m "
+        "JOIN pair_sessions p ON p.id = m.pair_id JOIN users u ON u.id = p.host_id "
+        "WHERE m.user_id=? AND m.status='invited' AND p.status IN ('invited', 'active') "
         "AND p.created_at >= datetime('now', '-12 hours') ORDER BY p.id DESC LIMIT 1",
         (g.user["id"],)).fetchone()
     return jsonify(profile=profile_dict(g.user), has_weight=has_weight,
                    week=week_info(conn, g.user),
                    pair_invite={"id": invite["id"], "host": invite["username"],
+                                "others": [m["name"] for m in pair_members(
+                                    conn, invite["id"], g.user["id"])
+                                    if m["user_id"] != invite["host_id"]
+                                    and m["status"] in ("invited", "active")],
                                 "kind": invite["kind"], "minutes": invite["minutes"],
                                 "kind_label": planner.KINDS.get(invite["kind"])}
                    if invite else None)
@@ -755,20 +760,46 @@ def start_workout(conn, uid, day, kind, minutes, pair_id=None):
     return cur.lastrowid
 
 
-# ---------- тренировка вдвоём ----------
+# ---------- совместная тренировка (2–3 человека) ----------
+
+MAX_PARTNERS = 2   # кроме того, кто зовёт
+
 
 @app.get("/api/users")
 @login_required
 def list_users():
-    rows = get_db().execute("SELECT username FROM users WHERE id != ? ORDER BY username",
-                            (g.user["id"],)).fetchall()
+    rows = get_db().execute("SELECT username FROM users WHERE id != ? AND blocked = 0 "
+                            "ORDER BY username", (g.user["id"],)).fetchall()
     return jsonify(items=[r["username"] for r in rows])
+
+
+def pair_members(conn, pid, uid=None):
+    """Участники совместной тренировки, кроме uid."""
+    rows = conn.execute(
+        "SELECT m.user_id, m.status, m.progress, u.username FROM pair_members m "
+        "JOIN users u ON u.id = m.user_id WHERE m.pair_id=? ORDER BY m.rowid",
+        (pid,)).fetchall()
+    return [{"user_id": r["user_id"], "name": r["username"], "status": r["status"],
+             "progress": json.loads(r["progress"]) if r["progress"] else None}
+            for r in rows if r["user_id"] != uid]
+
+
+def names_text(names):
+    """«Рита» / «Рита и Паша»."""
+    if len(names) <= 1:
+        return names[0] if names else ""
+    return ", ".join(names[:-1]) + " и " + names[-1]
+
+
+def pair_info(conn, pid, uid, role):
+    others = [m["name"] for m in pair_members(conn, pid, uid) if m["status"] != "declined"]
+    return {"id": pid, "role": role, "partners": others, "partner": names_text(others)}
 
 
 @app.post("/api/pair")
 @login_required
 def create_pair():
-    """Позвать друга: общий план из упражнений, подходящих обоим."""
+    """Позвать 1–2 друзей: общий план из упражнений, подходящих всем."""
     data = body()
     minutes = data.get("minutes")
     kind = data.get("kind")
@@ -776,18 +807,33 @@ def create_pair():
         raise ApiError("Выберите время и тип тренировки")
     conn = get_db()
     me_row = g.user
-    partner = conn.execute("SELECT * FROM users WHERE username=? AND id != ?",
-                           ((data.get("partner") or "").strip(), me_row["id"])).fetchone()
-    if not partner:
-        raise ApiError("Не нашли такого друга")
+    names = data.get("partners")
+    if not isinstance(names, list):
+        names = [data.get("partner")]
+    names = list(dict.fromkeys(str(n).strip() for n in names if n))
+    if not names:
+        raise ApiError("Выберите, с кем идёте")
+    if len(names) > MAX_PARTNERS:
+        raise ApiError(f"Можно позвать не больше {MAX_PARTNERS} друзей")
+    partners = []
+    for name in names:
+        row = conn.execute("SELECT * FROM users WHERE username=? AND id != ? AND blocked = 0",
+                           (name, me_row["id"])).fetchone()
+        if not row:
+            raise ApiError(f"Не нашли друга «{name}»")
+        partners.append(row)
     mine = db.exercises_for(conn, me_row["id"])
-    theirs = {e["id"]: e for e in db.exercises_for(conn, partner["id"])}
-    both = [dict(e, active=e["active"] and theirs[e["id"]]["active"]) for e in mine]
+    active = {e["id"]: e["active"] for e in mine}
+    injuries = set(profile_dict(me_row)["injuries"])
+    for partner in partners:
+        for e in db.exercises_for(conn, partner["id"]):
+            active[e["id"]] = active.get(e["id"], False) and e["active"]
+        injuries |= set(profile_dict(partner)["injuries"])
+    everyone = [dict(e, active=active[e["id"]]) for e in mine]
     profile = profile_dict(me_row)
-    common = dict(profile, injuries=sorted(set(profile["injuries"]) | set(
-        profile_dict(partner)["injuries"])))
+    common = dict(profile, injuries=sorted(injuries))
     plan = planner.build_plan(
-        both, common, minutes, kind,
+        everyone, common, minutes, kind,
         recent_ids=db.recent_exercise_ids(conn, me_row["id"]),
         history=db.last_sets(conn, me_row["id"]),
         notes=db.user_notes(conn, me_row["id"]))
@@ -800,21 +846,28 @@ def create_pair():
     cur = conn.execute(
         "INSERT INTO pair_sessions (host_id, guest_id, kind, minutes, date, ex_ids) "
         "VALUES (?,?,?,?,?,?)",
-        (me_row["id"], partner["id"], kind, minutes, valid_date(data.get("date")),
+        (me_row["id"], partners[0]["id"], kind, minutes, valid_date(data.get("date")),
          json.dumps([i["exercise_id"] for i in plan["items"]])))
     pair_id = cur.lastrowid
+    conn.execute("INSERT INTO pair_members (pair_id, user_id, status) VALUES (?,?,'active')",
+                 (pair_id, me_row["id"]))
+    conn.executemany("INSERT INTO pair_members (pair_id, user_id) VALUES (?,?)",
+                     [(pair_id, p["id"]) for p in partners])
     plan["workout_id"] = start_workout(conn, me_row["id"], data.get("date"), kind,
                                        minutes, pair_id)
     plan["date"] = valid_date(data.get("date"))
-    plan["pair"] = {"id": pair_id, "partner": partner["username"], "role": "host"}
+    plan["pair"] = pair_info(conn, pair_id, me_row["id"], "host")
     return jsonify(plan=plan)
 
 
 def pair_session(conn, pid):
+    """Совместная тренировка и моя запись в ней (чужим — 404)."""
     p = conn.execute("SELECT * FROM pair_sessions WHERE id=?", (pid,)).fetchone()
-    if not p or g.user["id"] not in (p["host_id"], p["guest_id"]):
+    member = conn.execute("SELECT * FROM pair_members WHERE pair_id=? AND user_id=?",
+                          (pid, g.user["id"])).fetchone()
+    if not p or not member:
         raise ApiError("Приглашение не найдено", 404)
-    return p
+    return p, member
 
 
 @app.post("/api/pair/<int:pid>/join")
@@ -822,20 +875,22 @@ def pair_session(conn, pid):
 def join_pair(pid):
     data = body()
     conn = get_db()
-    p = pair_session(conn, pid)
-    if p["guest_id"] != g.user["id"] or p["status"] not in ("invited", "active"):
+    p, member = pair_session(conn, pid)
+    if (p["host_id"] == g.user["id"] or member["status"] not in ("invited", "active")
+            or p["status"] not in ("invited", "active")):
         raise ApiError("Это приглашение уже неактуально")
     uid = g.user["id"]
     plan = planner.plan_from_ids(
         db.exercises_for(conn, uid), profile_dict(g.user), p["minutes"], p["kind"],
         json.loads(p["ex_ids"]), history=db.last_sets(conn, uid),
         notes=db.user_notes(conn, uid))
+    conn.execute("UPDATE pair_members SET status='active' WHERE pair_id=? AND user_id=?",
+                 (pid, uid))
     conn.execute("UPDATE pair_sessions SET status='active' WHERE id=?", (pid,))
-    host = conn.execute("SELECT username FROM users WHERE id=?", (p["host_id"],)).fetchone()
     plan["workout_id"] = start_workout(conn, uid, data.get("date"), p["kind"],
                                        p["minutes"], pid)
     plan["date"] = valid_date(data.get("date"))
-    plan["pair"] = {"id": pid, "partner": host["username"], "role": "guest"}
+    plan["pair"] = pair_info(conn, pid, uid, "guest")
     return jsonify(plan=plan)
 
 
@@ -843,36 +898,52 @@ def join_pair(pid):
 @login_required
 def decline_pair(pid):
     conn = get_db()
-    p = pair_session(conn, pid)
-    if p["status"] == "invited":
-        conn.execute("UPDATE pair_sessions SET status='declined' WHERE id=?", (pid,))
+    p, member = pair_session(conn, pid)
+    if member["status"] == "invited":
+        conn.execute("UPDATE pair_members SET status='declined' WHERE pair_id=? AND user_id=?",
+                     (pid, g.user["id"]))
+        waiting = conn.execute(
+            "SELECT 1 FROM pair_members WHERE pair_id=? AND user_id != ? "
+            "AND status IN ('invited', 'active')", (pid, p["host_id"])).fetchone()
+        if p["status"] == "invited" and not waiting:
+            conn.execute("UPDATE pair_sessions SET status='declined' WHERE id=?", (pid,))
         conn.commit()
     return jsonify(ok=True)
+
+
+def small_int(v):
+    try:
+        return max(0, min(999, int(v)))
+    except (TypeError, ValueError):
+        return 0
 
 
 @app.put("/api/pair/<int:pid>/progress")
 @login_required
 def pair_progress(pid):
-    """Отправить свой прогресс и получить прогресс партнёра."""
+    """Отправить свой прогресс и получить прогресс остальных."""
     data = body()
     conn = get_db()
-    p = pair_session(conn, pid)
-    me_host = p["host_id"] == g.user["id"]
-    mine = {k: data.get(k) for k in ("cur", "count", "name", "done", "total")}
-    conn.execute(f"UPDATE pair_sessions SET {'host' if me_host else 'guest'}_progress=? "
-                 "WHERE id=?", (json.dumps(mine, ensure_ascii=False), pid))
+    p, _ = pair_session(conn, pid)
+    mine = {k: small_int(data.get(k)) for k in ("cur", "count", "done", "total")}
+    mine["name"] = str(data.get("name") or "")[:120]
+    conn.execute("UPDATE pair_members SET progress=? WHERE pair_id=? AND user_id=?",
+                 (json.dumps(mine, ensure_ascii=False), pid, g.user["id"]))
     conn.commit()
-    other = p["guest_progress"] if me_host else p["host_progress"]
-    return jsonify(status=p["status"], partner=json.loads(other) if other else None)
+    others = [{k: m[k] for k in ("name", "status", "progress")}
+              for m in pair_members(conn, pid, g.user["id"])]
+    first = next((m["progress"] for m in others if m["progress"]), None)
+    return jsonify(status=p["status"], partners=others, partner=first)
 
 
 def pair_partner(conn, wid, uid):
-    """С кем была тренировка вдвоём (имя) или None."""
-    row = conn.execute(
-        "SELECT u.username FROM workouts w JOIN pair_sessions p ON p.id = w.pair_id "
-        "JOIN users u ON u.id = CASE WHEN p.host_id = w.user_id THEN p.guest_id "
-        "ELSE p.host_id END WHERE w.id=?", (wid,)).fetchone()
-    return row["username"] if row else None
+    """С кем была совместная тренировка («Рита» или «Рита и Паша») или None."""
+    w = conn.execute("SELECT user_id, pair_id FROM workouts WHERE id=?", (wid,)).fetchone()
+    if not w or not w["pair_id"]:
+        return None
+    names = [m["name"] for m in pair_members(conn, w["pair_id"], w["user_id"])
+             if m["status"] == "active"]
+    return names_text(names) or None
 
 
 # ---------- реакции ----------
@@ -937,8 +1008,8 @@ def finish_workout(wid):
         # устройстве) — сохраняем тренировку заново, чтобы не потерять.
         pair_id = data.get("pair_id")
         if pair_id and not conn.execute(
-                "SELECT 1 FROM pair_sessions WHERE id=? AND (host_id=? OR guest_id=?)",
-                (pair_id, uid, uid)).fetchone():
+                "SELECT 1 FROM pair_members WHERE pair_id=? AND user_id=?",
+                (pair_id, uid)).fetchone():
             pair_id = None
         cur = conn.execute(
             "INSERT INTO workouts (user_id, date, kind, minutes, pair_id) "

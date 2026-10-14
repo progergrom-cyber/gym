@@ -89,6 +89,14 @@ CREATE TABLE IF NOT EXISTS pair_sessions (
     guest_progress TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Участники совместной тренировки (2–3 человека, включая того, кто позвал)
+CREATE TABLE IF NOT EXISTS pair_members (
+    pair_id INTEGER NOT NULL REFERENCES pair_sessions(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'invited',
+    progress TEXT,
+    PRIMARY KEY (pair_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS reactions (
     workout_id INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -167,6 +175,14 @@ def init_db(conn):
                 "INSERT OR IGNORE INTO user_hidden (user_id, exercise_id) VALUES (?, ?)",
                 [(u, ex_id) for u in users])
         conn.execute("INSERT INTO meta (key, value) VALUES ('personal_v1', '1')")
+    # Тренировки вдвоём из прошлой версии → список участников
+    if not conn.execute("SELECT 1 FROM meta WHERE key='pair_members_v1'").fetchone():
+        for p in conn.execute("SELECT * FROM pair_sessions").fetchall():
+            conn.execute("INSERT OR IGNORE INTO pair_members (pair_id, user_id, status, progress) "
+                         "VALUES (?,?,?,?)", (p["id"], p["host_id"], "active", p["host_progress"]))
+            conn.execute("INSERT OR IGNORE INTO pair_members (pair_id, user_id, status, progress) "
+                         "VALUES (?,?,?,?)", (p["id"], p["guest_id"], p["status"], p["guest_progress"]))
+        conn.execute("INSERT INTO meta (key, value) VALUES ('pair_members_v1', '1')")
     conn.commit()
 
 
@@ -309,6 +325,10 @@ def delete_user(conn, user_id):
     conn.execute("DELETE FROM workouts WHERE user_id=?", (user_id,))   # подходы — каскадом
     for table in ("measurements", "exercise_notes", "user_hidden"):
         conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
-    conn.execute("DELETE FROM pair_sessions WHERE host_id=? OR guest_id=?", (user_id, user_id))
+    conn.execute("DELETE FROM pair_members WHERE user_id=? OR pair_id IN "
+                 "(SELECT id FROM pair_sessions WHERE host_id=?)", (user_id, user_id))
+    conn.execute("DELETE FROM pair_sessions WHERE host_id=?", (user_id,))
+    # guest_id — старая колонка; участники теперь в pair_members
+    conn.execute("UPDATE pair_sessions SET guest_id=host_id WHERE guest_id=?", (user_id,))
     conn.execute("DELETE FROM invites WHERE used_by=?", (user_id,))
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))

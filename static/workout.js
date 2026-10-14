@@ -12,6 +12,9 @@ const KIND_HINTS = {
 const root = $('#app');
 let me = null;
 let plan = store.get('plan');   // текущий план хранится в телефоне
+// Вид плана: 'focus' — по одному упражнению на экран, 'list' — всё списком
+let view = store.get('view', 'focus') === 'list' ? 'list' : 'focus';
+const MAX_PARTNERS = 2;
 
 function save() { store.set('plan', plan); }
 
@@ -122,8 +125,9 @@ function renderSetup(message) {
     ${needProfile ? `<div class="note warn">Заполните рост в разделе
       <a href="/settings">Профиль</a> и вес в разделе <a href="/progress#body">Прогресс</a>.</div>` : ''}
     ${me && me.pair_invite ? `<div class="card invite">
-      <div><b>👥 ${esc(me.pair_invite.host)}</b> зовёт тренироваться вдвоём</div>
-      <div class="small muted">${esc(me.pair_invite.kind_label)} · ${me.pair_invite.minutes} мин ·
+      <div><b>👥 ${esc(me.pair_invite.host)}</b> зовёт тренироваться ${(me.pair_invite.others || []).length
+        ? `вместе с ${esc(me.pair_invite.others.join(', '))}` : 'вдвоём'}</div>
+      <div class="small muted">${esc(me.pair_invite.kind_label)} · ${Number(me.pair_invite.minutes)} мин ·
         те же упражнения, но ваши подходы и веса</div>
       <div class="dialog-actions">
         <button class="btn ghost" type="button" id="pair-decline">Не сейчас</button>
@@ -143,10 +147,11 @@ function renderSetup(message) {
       </div>
       <button class="btn primary big" id="make" type="button">Начать</button>
       <button class="link-btn" id="other-kind" type="button">другой тип тренировки ›</button>
-      <button class="link-btn" id="pair-open" type="button">👥 тренироваться вдвоём ›</button>
+      <button class="link-btn" id="pair-open" type="button">👥 тренироваться вместе ›</button>
       <div id="pair-box" hidden>
-        <div class="small muted" style="margin-top:6px">С кем идёте? Друг получит приглашение
-          на главной. План будет из упражнений, которые подходят вам обоим.</div>
+        <div class="small muted" style="margin-top:6px">С кем идёте? Можно выбрать одного или двух
+          друзей — каждый получит приглашение на главной. План будет из упражнений,
+          которые подходят всем.</div>
         <div class="chips-row wrap" id="pair-users"><span class="small muted">Загрузка…</span></div>
         <button class="btn primary wide" id="pair-invite" type="button" hidden></button>
       </div>
@@ -207,11 +212,13 @@ function renderSetup(message) {
   $('#pair-users').addEventListener('click', e => {
     const b = e.target.closest('[data-user]');
     if (!b) return;
-    $('#pair-users').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-    const btn = $('#pair-invite');
-    btn.hidden = false;
-    btn.dataset.user = b.dataset.user;
-    btn.textContent = 'Позвать и начать';
+    const chosen = $('#pair-users').querySelectorAll('button.on');
+    if (!b.classList.contains('on') && chosen.length >= MAX_PARTNERS) {
+      toast(`Можно позвать не больше ${MAX_PARTNERS} друзей`);
+      return;
+    }
+    b.classList.toggle('on');
+    pairButtonText();
   });
   $('#pair-invite').addEventListener('click', invitePartner);
   if ($('#pair-join')) {
@@ -222,6 +229,17 @@ function renderSetup(message) {
       renderSetup();
     });
   }
+}
+
+function chosenPartners() {
+  return [...$('#pair-users').querySelectorAll('button.on')].map(b => b.dataset.user);
+}
+
+function pairButtonText() {
+  const btn = $('#pair-invite');
+  const n = chosenPartners().length;
+  btn.hidden = n === 0;
+  btn.textContent = n === 2 ? 'Позвать обоих и начать' : 'Позвать и начать';
 }
 
 function startPlan(p) {
@@ -241,14 +259,14 @@ async function invitePartner() {
   try {
     await flushPending();
     const res = await api('POST', '/api/pair', {
-      partner: btn.dataset.user, minutes: choice.minutes, kind: choice.kind, date: todayISO(),
+      partners: chosenPartners(), minutes: choice.minutes, kind: choice.kind, date: todayISO(),
     });
     startPlan(res.plan);
-    toast(`${res.plan.pair.partner} увидит приглашение у себя на главной`, 5000);
+    toast(`Приглашение отправлено: ${res.plan.pair.partner}. Оно появится у них на главной`, 5000);
   } catch (e) {
     toast(e.message, 4000);
     btn.disabled = false;
-    btn.textContent = 'Позвать и начать';
+    pairButtonText();
   }
 }
 
@@ -268,7 +286,7 @@ async function joinPair() {
   }
 }
 
-// ---------- прогресс партнёра (тренировка вдвоём) ----------
+// ---------- прогресс остальных (совместная тренировка) ----------
 
 let pairSyncAt = 0;
 async function syncPair(force) {
@@ -284,7 +302,7 @@ async function syncPair(force) {
     });
     if (!plan || !plan.pair) return;
     plan.pair.status = res.status;
-    plan.pair.progress = res.partner;
+    plan.pair.members = res.partners || null;
     save();
     showPair();
   } catch (e) { /* без связи — покажем, что знали */ }
@@ -293,18 +311,21 @@ async function syncPair(force) {
 function showPair() {
   const el = $('#pair-line');
   if (!el || !plan || !plan.pair) return;
-  const p = plan.pair.progress;
-  const name = esc(plan.pair.partner);
-  if (p) {
-    el.innerHTML = `👥 <b>${name}</b>: ${p.cur > 0 ? `упражнение ${p.cur} из ${p.count}` : 'разминка'}
-      · ${p.done}/${p.total} подходов`;
-  } else if (plan.pair.status === 'declined') {
-    el.innerHTML = `👥 <b>${name}</b>: «не сейчас» — тренируйтесь в своём темпе`;
-  } else {
-    el.innerHTML = plan.pair.role === 'host'
-      ? `👥 Приглашение отправлено: <b>${name}</b>. Ждём, когда присоединится`
-      : `👥 Вместе с: <b>${name}</b>`;
-  }
+  // До первой связи с сервером знаем только имена
+  const members = plan.pair.members || (plan.pair.partners || [plan.pair.partner]).map(name => ({
+    name, status: plan.pair.role === 'host' ? 'invited' : 'active', progress: null,
+  }));
+  el.innerHTML = members.map(m => {
+    const p = m.progress;
+    const name = `<b>${esc(m.name)}</b>`;
+    if (m.status === 'declined') return `<div>👥 ${name}: «не сейчас»</div>`;
+    if (p) {
+      return `<div>👥 ${name}: ${Number(p.cur) > 0 ? `упражнение ${Number(p.cur)} из ${Number(p.count)}`
+        : 'разминка'} · ${Number(p.done)}/${Number(p.total)} подходов</div>`;
+    }
+    if (m.status === 'invited') return `<div>👥 ${name}: ждём, когда присоединится</div>`;
+    return `<div>👥 ${name}: уже с вами</div>`;
+  }).join('');
 }
 
 async function makePlan() {
@@ -468,6 +489,7 @@ function renderExercise(idx) {
 
     <div class="ex-actions">
       <button class="btn small ghost add-set" type="button">+ подход</button>
+      ${canRemoveSet(item) ? '<button class="btn small ghost remove-set" type="button">− подход</button>' : ''}
       ${started ? '' : '<button class="btn small ghost replace" type="button">Заменить</button>'}
       ${item.noteOpen || noteOf(item) ? '' : '<button class="btn small ghost edit-note" type="button">📝 Заметка</button>'}
       <button class="btn small ghost danger remove" type="button">Убрать</button>
@@ -482,18 +504,134 @@ function renderExercise(idx) {
   <button class="btn ${allDone ? 'primary big' : 'ghost wide'}" id="finish" type="button">Завершить тренировку</button>`;
 }
 
+// Лишний подход можно убрать, пока он не сделан (последний оставшийся — нельзя,
+// для этого есть «Убрать упражнение»)
+function canRemoveSet(item) { return item.log.length > 1 && item.log.some(s => !s.done); }
+
+function removeSet(item) {
+  let j = -1;
+  item.log.forEach((s, k) => { if (!s.done) j = k; });
+  if (j < 0 || item.log.length <= 1) return;
+  item.log.splice(j, 1);
+  save();
+  renderPlan();
+  toast(`Осталось подходов: ${item.log.length}`);
+}
+
+function viewSwitch() {
+  return `<div class="seg view-switch" role="group" aria-label="Вид плана">
+    <button type="button" data-view="focus" class="${view === 'focus' ? 'on' : ''}">По одному</button>
+    <button type="button" data-view="list" class="${view === 'list' ? 'on' : ''}">Списком</button>
+  </div>`;
+}
+
+// Старый вид: разминка и все упражнения друг за другом
+function renderListWarmup() {
+  const options = plan.warmup || [];
+  const w = options[plan.warmup_idx || 0];
+  return `
+    <div class="card warmup">
+      ${w && w.photo ? `<button class="thumb big ex-photo" type="button" data-photo="${esc(w.photo)}"
+        aria-label="Открыть фото"><img src="${esc(w.photo)}" alt="" loading="lazy"></button>` : ''}
+      <div class="grow">
+        <h3>Разминка ~${plan.warmup_min} мин</h3>
+        <div class="small muted" style="margin-top:4px">${w
+          ? `5 минут: <b style="color:var(--text)">${esc(w.name)}</b>${w.equipment ? ' (' + esc(w.equipment) + ')' : ''}, в лёгком темпе.`
+          : '5 минут лёгкого кардио (дорожка, велотренажёр, эллипс).'}
+          Потом вращения в плечах, локтях, коленях. В базовых упражнениях первый подход
+          можно сделать с половиной веса.</div>
+        ${options.length > 1 ? '<button class="btn small ghost" type="button" id="warmup-next" style="margin-top:10px">Другой тренажёр</button>' : ''}
+      </div>
+    </div>`;
+}
+
+function renderItem(item, idx) {
+  const done = item.log.filter(s => s.done).length;
+  const complete = isDone(item);
+  return `
+  <article class="card ex ${complete ? 'complete' : ''}" data-i="${idx}">
+    ${item.photo ? `<button class="ex-photo" type="button" data-photo="${esc(item.photo)}"
+      aria-label="Открыть фото тренажёра"><img src="${esc(item.photo)}" alt="" loading="lazy"></button>` : ''}
+    <div class="ex-body">
+      <div class="ex-top">
+        <span class="num">${complete ? '✓' : idx + 1}</span>
+        <div>
+          <h3>${esc(item.name)}</h3>
+          <div class="meta">${esc(item.equipment)}${item.equipment ? ' · ' : ''}${esc(item.muscle_label)}</div>
+        </div>
+      </div>
+      <div class="presc">
+        <span>${item.log.length} × ${item.rep_lo}–${item.rep_hi}</span>
+        <span>отдых ${fmtSec(item.rest)}</span>
+        <span>${item.kind === 'compound' ? 'база' : 'изоляция'}</span>
+      </div>
+      <div class="hint">${esc(item.hint)}</div>
+      ${renderNote(item)}
+      ${item.tips && item.tips.length ? `
+        <details class="tips" ${item.tipsOpen ? 'open' : ''}>
+          <summary>Как делать</summary>
+          <ul>${item.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+        </details>` : ''}
+      <div class="sets">
+        <div class="set-head"><span>#</span><span>Вес, кг</span><span>Повторы</span><span></span></div>
+        ${item.log.map((s, j) => `
+          <div class="set ${s.done ? 'done' : ''}" data-j="${j}">
+            <span class="set-no">${j + 1}</span>
+            <input class="w" inputmode="decimal" autocomplete="off" aria-label="Вес, подход ${j + 1}"
+              value="${esc(shown(s.weight))}" placeholder="кг" ${s.done ? 'readonly' : ''}>
+            <input class="r" inputmode="numeric" autocomplete="off" aria-label="Повторы, подход ${j + 1}"
+              value="${esc(shown(s.reps))}" placeholder="${item.rep_lo}–${item.rep_hi}" ${s.done ? 'readonly' : ''}>
+            <button class="check" type="button" aria-label="${s.done ? 'Снять отметку' : 'Подход выполнен'}">${s.done ? '✓' : ''}</button>
+          </div>`).join('')}
+      </div>
+      <div class="ex-actions">
+        <button class="btn small ghost add-set" type="button">+ подход</button>
+        ${canRemoveSet(item) ? '<button class="btn small ghost remove-set" type="button">− подход</button>' : ''}
+        ${done ? '' : '<button class="btn small ghost replace" type="button">Заменить</button>'}
+        ${item.noteOpen || noteOf(item) ? '' : '<button class="btn small ghost edit-note" type="button">📝 Заметка</button>'}
+        <button class="btn small ghost danger remove" type="button">Убрать</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderList() {
+  const warnings = plan.warnings || [];
+  const total = plan.items.reduce((n, i) => n + i.log.length, 0);
+  const done = plan.items.reduce((n, i) => n + i.log.filter(s => s.done).length, 0);
+  const pct = total ? Math.round(done / total * 100) : 0;
+  return `
+    <div class="hero">
+      <div class="h">${esc(plan.kind_label)} · ${planMinutes()} мин</div>
+      <div class="small muted">${esc(fmtDate(plan.date))} · ${plan.items.length} упражнений · лимит ${plan.minutes} мин</div>
+      <div class="progress"><i style="width:${pct}%"></i></div>
+      <div class="hero-stats"><span>Сделано подходов: ${done} из ${total}</span><span>${pct}%</span></div>
+    </div>
+    ${warnings.length ? `<details class="note warn"><summary>Подсказки к плану (${warnings.length})</summary>
+      <ul>${warnings.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+    ${renderListWarmup()}
+    ${plan.items.map(renderItem).join('')}
+    ${plan.items.length ? '' : '<div class="note warn">В плане нет упражнений.</div>'}
+    <button class="btn ghost wide" id="overview" type="button">☰ Порядок упражнений</button>
+    <button class="btn ghost wide" id="add-ex" type="button">＋ Добавить упражнение</button>
+    <button class="btn primary big" id="finish" type="button">Завершить тренировку</button>
+    <button class="btn ghost wide danger" id="cancel" type="button">Отменить план</button>`;
+}
+
 function renderPlan() {
   if (plan.cur === undefined) {   // план от прошлой версии приложения
     plan.cur = plan.items.some(i => i.log.some(s => s.done)) ? Math.max(0, nextUnfinished(-1)) : -1;
   }
   if (plan.cur >= plan.items.length) plan.cur = plan.items.length - 1;
   setTitle(`${plan.kind_label} · ${plan.minutes} мин`);
-  root.innerHTML = `
+  const pairLine = plan.pair ? '<div class="pair-line" id="pair-line"></div>' : '';
+  root.innerHTML = view === 'list' ? `${viewSwitch()}${pairLine}${renderList()}` : `
+    ${viewSwitch()}
     <div class="focus-top">
       ${progressBar()}
       <button class="btn small ghost" type="button" id="overview">☰ Все упражнения</button>
     </div>
-    ${plan.pair ? '<div class="pair-line" id="pair-line"></div>' : ''}
+    ${pairLine}
     ${plan.cur < 0 ? renderWarmup() : renderExercise(plan.cur)}`;
   const fin = $('#finish');
   if (fin) fin.addEventListener('click', finishWorkout);
@@ -506,32 +644,54 @@ function go(i) {
   plan.cur = Math.max(-1, Math.min(plan.items.length - 1, i));
   save();
   renderPlan();
-  window.scrollTo(0, 0);
+  const card = view === 'list' && root.querySelector(`.ex[data-i="${plan.cur}"]`);
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  else window.scrollTo(0, 0);
+}
+
+// Номер упражнения, на котором нажали (в виде «списком» их много на экране)
+function cardIndex(t) {
+  const card = t.closest('.ex');
+  return card ? Number(card.dataset.i) : plan.cur;
 }
 
 // Ввод значений и заметки — сохраняем сразу, чтобы ничего не потерялось
 root.addEventListener('input', e => {
   if (!plan) return;
-  const item = plan.items[plan.cur];
+  const item = plan.items[cardIndex(e.target)];
   if (!item) return;
-  if (e.target.classList.contains('ex-note')) {
+  const cl = e.target.classList;
+  if (cl.contains('ex-note')) {
     plan.notes = plan.notes || {};
     plan.notes[item.exercise_id] = e.target.value;
     save();
-  } else if (e.target.classList.contains('step-val')) {
+  } else if (cl.contains('step-val')) {
     const s = item.log.find(x => !x.done);
     if (s) { s[e.target.dataset.f] = e.target.value; save(); }
+  } else if (cl.contains('w') || cl.contains('r')) {
+    const s = item.log[e.target.closest('.set').dataset.j];
+    if (s) { s[cl.contains('w') ? 'weight' : 'reps'] = e.target.value; save(); }
   }
 });
 
 root.addEventListener('click', e => {
   if (!plan) return;
   const t = e.target;
+  const viewBtn = t.closest('[data-view]');
+  if (viewBtn) {
+    view = viewBtn.dataset.view === 'list' ? 'list' : 'focus';
+    store.set('view', view);
+    renderPlan();
+    window.scrollTo(0, 0);
+    return;
+  }
   const goBtn = t.closest('[data-go]');
   if (goBtn) { go(Number(goBtn.dataset.go)); return; }
   const photo = t.closest('.ex-photo');
   if (photo) { showPhoto(photo.dataset.photo); return; }
   if (t.closest('#overview')) { openOverview(); return; }
+  if (t.closest('#add-ex')) { openAddDialog(); return; }
+  if (t.closest('#cancel')) { cancelPlan(); return; }
   if (t.closest('#warmup-next')) {
     plan.warmup_idx = ((plan.warmup_idx || 0) + 1) % plan.warmup.length;
     save();
@@ -539,11 +699,15 @@ root.addEventListener('click', e => {
     return;
   }
 
-  const idx = plan.cur;
+  const idx = cardIndex(t);
   const item = plan.items[idx];
   if (!item) return;
 
-  if (t.closest('.step')) {
+  if (t.closest('.check')) {
+    toggleSet(item, idx, Number(t.closest('.set').dataset.j));
+  } else if (t.closest('.remove-set')) {
+    removeSet(item);
+  } else if (t.closest('.step')) {
     const b = t.closest('.step');
     const s = item.log.find(x => !x.done);
     if (!s) return;
@@ -570,7 +734,7 @@ root.addEventListener('click', e => {
     item.noteOpen = true;
     save();
     renderPlan();
-    const ta = $('.ex-note');
+    const ta = root.querySelector(`.ex[data-i="${idx}"] .ex-note`);
     if (ta) ta.focus();
   } else if (t.closest('.note-done')) {
     item.noteOpen = false;
@@ -584,9 +748,48 @@ root.addEventListener('click', e => {
 // Запоминаем, раскрыт ли блок «Как делать»
 root.addEventListener('toggle', e => {
   if (!plan || !e.target.classList || !e.target.classList.contains('tips')) return;
-  const item = plan.items[plan.cur];
+  const item = plan.items[cardIndex(e.target)];
   if (item) { item.tipsOpen = e.target.open; save(); }
 }, true);
+
+// Вид «списком»: галочка у подхода. Повторное нажатие снимает отметку
+function toggleSet(item, idx, j) {
+  const s = item.log[j];
+  if (!s) return;
+  if (s.done) {
+    s.done = false;
+    save();
+    renderPlan();
+    return;
+  }
+  const row = root.querySelector(`.ex[data-i="${idx}"] .set[data-j="${j}"]`);
+  const weight = parseNum(row.querySelector('.w').value);
+  const reps = parseInt(row.querySelector('.r').value, 10);
+  if (!reps || reps <= 0) {
+    toast('Введите, сколько повторов сделали');
+    row.querySelector('.r').focus();
+    return;
+  }
+  s.weight = weight ?? 0;
+  s.reps = reps;
+  s.done = true;
+  // Вес подставим во все следующие подходы, повторы — где ещё пусто
+  item.log.slice(j + 1).forEach(x => {
+    if (x.done) return;
+    x.weight = s.weight;
+    if (x.reps === '' || x.reps == null) x.reps = s.reps;
+  });
+  plan.cur = idx;
+  pairSyncAt = 0;
+  save();
+  renderPlan();
+  if (plan.items.every(isDone)) {
+    stopTimer();
+    toast('Все подходы сделаны! Нажмите «Завершить тренировку» 💪', 5000);
+  } else {
+    startTimer(item.rest);
+  }
+}
 
 function completeSet(item, idx) {
   const s = item.log.find(x => !x.done);
@@ -791,6 +994,10 @@ function addExercise(id) {
   if (plan.cur >= 0 && isDone(plan.items[plan.cur])) plan.cur = plan.items.length - 1;
   save();
   renderPlan();
+  if (view === 'list') {
+    const cards = root.querySelectorAll('.ex');
+    cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   toast(`Добавлено в конец: ${item.name}. Порядок — в «Все упражнения»`, 4000);
 }
 

@@ -206,6 +206,40 @@ class AppTests(unittest.TestCase):
         self.assertEqual(rita["partner"], "pasha")
         self.assertEqual(host.get("/api/me").get_json()["week"]["last"]["partner"], "rita")
 
+    def test_group_of_three(self):
+        host = new_client("gena")
+        a = new_client("dina")
+        b = new_client("egor")
+        press = ex_id("Жим ногами")
+        b.put(f"/api/exercises/{press}/mine", json={"enabled": False})
+        r = host.post("/api/pair", json={"partners": ["dina", "egor"],
+                                         "minutes": 60, "kind": "lower"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        hplan = r.get_json()["plan"]
+        self.assertEqual(hplan["pair"]["partners"], ["dina", "egor"])
+        self.assertNotIn(press, [i["exercise_id"] for i in hplan["items"]])
+        # Больше двух друзей звать нельзя
+        new_client("fima")
+        self.assertEqual(host.post("/api/pair", json={
+            "partners": ["dina", "egor", "fima"], "minutes": 60,
+            "kind": "lower"}).status_code, 400)
+
+        inv = a.get("/api/me").get_json()["pair_invite"]
+        self.assertEqual((inv["host"], inv["others"]), ("gena", ["egor"]))
+        pid = inv["id"]
+        a.post(f"/api/pair/{pid}/join", json={})
+        b.post(f"/api/pair/{pid}/decline", json={})
+        a.put(f"/api/pair/{pid}/progress", json={"cur": 1, "done": 3, "name": "<b>x</b>"})
+        got = host.put(f"/api/pair/{pid}/progress", json={"cur": 2}).get_json()
+        by_name = {m["name"]: m for m in got["partners"]}
+        self.assertEqual(by_name["dina"]["progress"]["done"], 3)
+        self.assertEqual(by_name["egor"]["status"], "declined")
+        sets = [{"exercise_id": hplan["items"][0]["exercise_id"], "set_no": 1,
+                 "weight": 40, "reps": 10}]
+        host.post(f"/api/workouts/{hplan['workout_id']}/finish",
+                  json={"date": "2026-10-12", "kind": "lower", "minutes": 60, "sets": sets})
+        self.assertEqual(host.get("/api/me").get_json()["week"]["last"]["partner"], "dina")
+
     def test_reactions(self):
         a = new_client("tima")
         b = new_client("ula")

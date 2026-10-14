@@ -8,3 +8,4 @@ __pycache__/
 static/photos/
 .backup-*.db
 *.zip
+gym-backup-*.db
