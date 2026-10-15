@@ -116,6 +116,16 @@ CREATE TABLE IF NOT EXISTS user_hidden (
     exercise_id INTEGER NOT NULL REFERENCES exercises(id),
     PRIMARY KEY (user_id, exercise_id)
 );
+-- Свои тренировки-шаблоны: список упражнений, который можно повторять
+CREATE TABLE IF NOT EXISTS templates (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    minutes INTEGER NOT NULL,
+    ex_ids TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_sets_workout ON sets(workout_id);
 CREATE INDEX IF NOT EXISTS idx_workouts_user ON workouts(user_id, status);
 """
@@ -138,6 +148,10 @@ def init_db(conn):
     add_column(conn, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     add_column(conn, "users", "blocked", "INTEGER NOT NULL DEFAULT 0")
     add_column(conn, "users", "avatar", "TEXT")
+    add_column(conn, "workouts", "feel", "TEXT")       # самочувствие: fresh/ok/tired
+    add_column(conn, "sets", "effort", "INTEGER")      # 1 легко, 2 норм, 3 тяжело
+    add_column(conn, "users", "schedule", "TEXT")      # {"days": [0, 2, 4], "time": "19:00"}
+    add_column(conn, "users", "cal_token", "TEXT")     # секретная ссылка на календарь
     # Стартовый каталог. Каждое упражнение из SEED добавляется один раз:
     # новые версии приложения дополняют каталог, но не возвращают то,
     # что вы уже переименовали, и не трогают ваши правки.
@@ -227,11 +241,12 @@ def all_exercises(conn):
 
 
 def exercise_history(conn, user_id, per_exercise=6):
-    """{exercise_id: [{"date": ..., "sets": [(вес, повторы), ...]}, ...]} —
+    """{exercise_id: [{"date": ..., "sets": [(вес, повторы), ...],
+    "efforts": [тяжесть подхода или None, ...]}, ...]} —
     последние тренировки с этим упражнением, сначала новые."""
     rows = conn.execute(
         """
-        SELECT s.exercise_id, s.weight, s.reps, w.id AS wid, w.date
+        SELECT s.exercise_id, s.weight, s.reps, s.effort, w.id AS wid, w.date
         FROM sets s JOIN workouts w ON w.id = s.workout_id
         WHERE w.user_id = ? AND w.status = 'done'
         ORDER BY w.date DESC, w.id DESC, s.set_no
@@ -242,8 +257,9 @@ def exercise_history(conn, user_id, per_exercise=6):
         if not sessions or sessions[-1]["wid"] != r["wid"]:
             if len(sessions) >= per_exercise:
                 continue
-            sessions.append({"wid": r["wid"], "date": r["date"], "sets": []})
+            sessions.append({"wid": r["wid"], "date": r["date"], "sets": [], "efforts": []})
         sessions[-1]["sets"].append((r["weight"], r["reps"]))
+        sessions[-1]["efforts"].append(r["effort"])
     return out
 
 
@@ -324,7 +340,7 @@ def delete_user(conn, user_id):
     """Удалить пользователя и все его данные."""
     conn.execute("DELETE FROM reactions WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM workouts WHERE user_id=?", (user_id,))   # подходы — каскадом
-    for table in ("measurements", "exercise_notes", "user_hidden"):
+    for table in ("measurements", "exercise_notes", "user_hidden", "templates"):
         conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM pair_members WHERE user_id=? OR pair_id IN "
                  "(SELECT id FROM pair_sessions WHERE host_id=?)", (user_id, user_id))

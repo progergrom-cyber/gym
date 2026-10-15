@@ -205,6 +205,43 @@ class ProgressionTests(unittest.TestCase):
                                  8, 12)["weight"], 50)
 
 
+    def test_easy_sets_increase_weight(self):
+        last = [(50, 10), (50, 10), (50, 10)]
+        hist = [{"date": "2026-10-10", "sets": last, "efforts": [1, 1, 1]}]
+        self.assertEqual(suggest(self.press, last, 8, 12, hist)["weight"], 55)
+        # хотя бы один «норм» — добираем повторы как обычно
+        hist[0]["efforts"] = [1, 2, 1]
+        self.assertEqual(suggest(self.press, last, 8, 12, hist)["weight"], 50)
+        # без отметок — как раньше
+        hist[0]["efforts"] = [None, None, None]
+        self.assertEqual(suggest(self.press, last, 8, 12, hist)["weight"], 50)
+
+
+class FeelTests(unittest.TestCase):
+
+    def test_tired_plan_is_lighter(self):
+        normal = planner.build_plan(catalog(), profile(), 60, "upper", seed=1)
+        tired = planner.build_plan(catalog(), dict(profile(), tired=True), 60,
+                                   "upper", seed=1)
+        self.assertLess(tired["total_seconds"], normal["total_seconds"])
+        by_id = {i["exercise_id"]: i["sets"] for i in normal["items"]}
+        for item in tired["items"]:
+            if item["exercise_id"] in by_id:
+                self.assertLessEqual(item["sets"], by_id[item["exercise_id"]])
+
+    def test_no_increase(self):
+        cat = catalog()
+        ex = next(e for e in cat if e["kind"] == "compound" and e.get("active", True)
+                  and e["region"] == "upper")
+        hist = {ex["id"]: [{"date": "2026-10-10", "sets": [(50, 12)] * 3,
+                            "efforts": [None] * 3}]}
+        plan = planner.plan_from_ids(cat, profile(), 60, "upper", [ex["id"]], history=hist)
+        self.assertEqual(plan["items"][0]["weight"], 55)
+        plan = planner.plan_from_ids(cat, dict(profile(), no_increase=True), 60, "upper",
+                                     [ex["id"]], history=hist)
+        self.assertEqual(plan["items"][0]["weight"], 50)
+        self.assertIn("без прибавки", plan["items"][0]["hint"])
+
 def sessions(*items):
     """sessions(("2026-10-20", [(50, 10)]), ...) — сначала новые."""
     return [{"date": d, "sets": sets} for d, sets in items]

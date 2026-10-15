@@ -28,6 +28,7 @@ PLATEAU_SESSIONS = 3
 COMEBACK_DAYS = 21
 DELOAD = 0.9              # разгрузка: −10% веса
 LIGHT = 0.95              # тренировка легче этого — не «рабочая» (была разгрузка)
+EASY, NORMAL, HARD = 1, 2, 3   # как дался подход (отметка после подхода)
 
 
 def e1rm(weight, reps):
@@ -113,6 +114,16 @@ def suggest(ex, last_sets, rep_lo, rep_hi, sessions=None):
         return {"weight": new,
                 "text": f"В прошлый раз все подходы по {rep_hi}+ с {fmt(work)} кг"
                         f" — пробуй {fmt(new)} кг."}
+
+    # Все рабочие подходы отмечены «легко» и повторов хватило — вес мал
+    efforts = (sessions[0].get("efforts") if sessions else None) or []
+    work_eff = [e for (w, r), e in zip(last_sets or [], efforts)
+                if (w or 0) == work and r and r > 0]
+    if work_eff and all(e == EASY for e in work_eff) and min(work_reps) >= rep_lo:
+        new = work + increment(ex, work)
+        return {"weight": new,
+                "text": f"В прошлый раз {fmt(work)} кг дались легко — "
+                        f"пробуй {fmt(new)} кг."}
 
     if is_plateau(sessions):
         new = deload_weight(ex, work)

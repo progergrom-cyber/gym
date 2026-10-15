@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Nunito:wght@400;600;700;800&family=Noto+Serif+JP:wght@900&family=Russo+One&family=Exo+2:ital,wght@0,400;0,600;0,700;0,800;1,700&family=Rubik+Dirt&family=Oswald:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/style.css?v=14">
+  <link rel="stylesheet" href="/static/style.css?v=15">
   <title>Профиль</title>
 </head>
 <body>
@@ -73,6 +73,33 @@
         <button class="btn primary big" type="submit">Сохранить</button>
       </form>
 
+      <h2>Расписание</h2>
+      <div class="card sched-card">
+        <p class="small muted" style="margin:0 0 10px">В какие дни ходите в зал. На главной будет видно,
+          что тренировать в эти дни, а календарь в телефоне напомнит за 30 минут.</p>
+        <div class="day-picks" id="s-days" role="group" aria-label="Дни тренировок">
+          <button type="button" data-d="0">Пн</button><button type="button" data-d="1">Вт</button>
+          <button type="button" data-d="2">Ср</button><button type="button" data-d="3">Чт</button>
+          <button type="button" data-d="4">Пт</button><button type="button" data-d="5">Сб</button>
+          <button type="button" data-d="6">Вс</button>
+        </div>
+        <div class="sched-row">
+          <label class="field"><span>Время</span><input type="time" id="s-time" value="19:00"></label>
+          <label class="field"><span>Длительность</span>
+            <select id="s-min"><option value="45">45 мин</option><option value="60" selected>60 мин</option>
+              <option value="90">90 мин</option><option value="30">30 мин</option></select></label>
+        </div>
+        <button class="btn primary wide" id="s-save" type="button">Сохранить расписание</button>
+        <div id="cal-box" hidden>
+          <h3 style="margin-top:18px">Напоминания в календаре</h3>
+          <p class="small muted" style="margin:4px 0 0">Добавьте один раз — дальше календарь сам подтянет
+            изменения расписания.</p>
+          <a class="btn ghost wide" id="cal-ios" href="#">📅 iPhone: подписаться на календарь</a>
+          <a class="btn ghost wide" id="cal-google" href="#" target="_blank" rel="noopener">📅 Google Календарь (Android)</a>
+          <a class="btn ghost wide" id="cal-file" href="#" download="trenirovki.ics">⬇ Скачать файл календаря</a>
+          <button class="link-btn" id="cal-reset" type="button">Сделать новую ссылку (старая перестанет работать)</button>
+        </div>
+      </div>
       <h2>Оформление</h2>
       <div class="theme-grid" id="themes"></div>
 
@@ -138,7 +165,7 @@
     </form>
   </dialog>
 
-  <script src="/static/common.js?v=14"></script>
-  <script src="/static/settings.js?v=14"></script>
+  <script src="/static/common.js?v=15"></script>
+  <script src="/static/settings.js?v=15"></script>
 </body>
 </html>

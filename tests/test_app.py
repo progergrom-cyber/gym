@@ -457,5 +457,97 @@ class AvatarTest(unittest.TestCase):
         self.assertIsNone(s["since"])
 
 
+
+class NewFeaturesTest(unittest.TestCase):
+
+    def test_feel_tired_once_a_week(self):
+        c = new_client("tired1")
+        plan = c.post("/api/plan", json={"minutes": 60, "kind": "upper", "feel": "tired",
+                                         "date": "2026-10-01"}).get_json()["plan"]
+        self.assertEqual(plan["feel"], "tired")
+        self.assertIn("усталость", plan["warnings"][0])
+        item = plan["items"][0]
+        c.post(f"/api/workouts/{plan['workout_id']}/finish",
+               json={"date": "2026-10-01", "kind": "upper", "minutes": 60, "feel": "tired",
+                     "sets": [{"exercise_id": item["exercise_id"], "set_no": 1,
+                               "weight": 40, "reps": 10, "effort": 3}]})
+        conn = db.connect()
+        row = conn.execute("SELECT w.feel, s.effort FROM workouts w JOIN sets s "
+                           "ON s.workout_id = w.id WHERE w.id=?",
+                           (plan["workout_id"],)).fetchone()
+        conn.close()
+        self.assertEqual((row["feel"], row["effort"]), ("tired", 3))
+        # Через пару дней снова «устал» — объём обычный, только без прибавки
+        import app as a
+        real = a.date
+        class FakeDate(real):
+            @classmethod
+            def today(cls):
+                return real(2026, 10, 3)
+        a.date = FakeDate
+        try:
+            again = c.post("/api/plan", json={"minutes": 60, "kind": "upper", "feel": "tired",
+                                              "date": "2026-10-03"}).get_json()["plan"]
+        finally:
+            a.date = real
+        self.assertIn("уже облегчали", again["warnings"][0])
+
+    def test_templates(self):
+        c = new_client("tmpl")
+        ids = [ex_id("Жим от груди")]
+        r = c.post("/api/templates", json={"name": "Моя грудь", "kind": "upper",
+                                           "minutes": 45, "ex_ids": ids + [999999]})
+        item = r.get_json()["item"]
+        self.assertEqual(item["exercises"], ["Жим от груди"])
+        self.assertEqual(len(c.get("/api/templates").get_json()["items"]), 1)
+        plan = c.post(f"/api/templates/{item['id']}/plan",
+                      json={"date": "2026-10-02"}).get_json()["plan"]
+        self.assertEqual([i["exercise_id"] for i in plan["items"]], ids)
+        self.assertEqual(plan["template"], "Моя грудь")
+        # чужой шаблон не виден
+        other = new_client("tmpl2")
+        self.assertEqual(other.post(f"/api/templates/{item['id']}/plan",
+                                    json={}).status_code, 404)
+        self.assertEqual(c.post("/api/templates", json={"name": "", "ex_ids": ids}).status_code, 400)
+        c.delete(f"/api/templates/{item['id']}")
+        self.assertEqual(c.get("/api/templates").get_json()["items"], [])
+
+    def test_schedule_and_calendar(self):
+        c = new_client("sched")
+        self.assertEqual(c.put("/api/profile/schedule",
+                               json={"days": [0, 2, 9], "time": "19:00"}).status_code, 400)
+        self.assertEqual(c.put("/api/profile/schedule",
+                               json={"days": [0, 2], "time": "25:00"}).status_code, 400)
+        r = c.put("/api/profile/schedule", json={"days": [4, 0, 2], "time": "07:30",
+                                                  "minutes": 45})
+        self.assertEqual(r.get_json()["schedule"]["days"], [0, 2, 4])
+        me = c.get("/api/me").get_json()
+        self.assertEqual(me["profile"]["schedule"]["time"], "07:30")
+        self.assertIsNotNone(me["week"]["today_planned"])
+        path = c.get("/api/calendar").get_json()["path"]
+        self.assertEqual(c.get("/api/calendar").get_json()["path"], path)
+        ics = gym_app.app.test_client().get(path)   # без входа — по секретной ссылке
+        self.assertEqual(ics.status_code, 200)
+        text = ics.get_data(as_text=True)
+        self.assertIn("RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR", text)
+        self.assertIn("T073000", text)
+        self.assertIn("DURATION:PT45M", text)
+        self.assertEqual(gym_app.app.test_client().get("/cal/wrong.ics").status_code, 404)
+        c.post("/api/calendar/reset")
+        self.assertEqual(gym_app.app.test_client().get(path).status_code, 404)
+        # пустой список дней — расписание выключено
+        c.put("/api/profile/schedule", json={"days": []})
+        self.assertIsNone(c.get("/api/me").get_json()["profile"]["schedule"])
+
+    def test_schedule_week_rotation(self):
+        from datetime import date
+        out = gym_app.schedule_week({"days": [0, 2, 4]}, date(2026, 10, 12), "2026-10-12",
+                                    {}, "upper", False)
+        self.assertEqual([d["kind"] for d in out], ["upper", "lower", "upper"])
+        out = gym_app.schedule_week({"days": [0, 2, 4]}, date(2026, 10, 14), "2026-10-12",
+                                    {"2026-10-14": ["upper"]}, "lower", False)
+        self.assertEqual([(d["date"], d["kind"]) for d in out], [("2026-10-16", "lower")])
+
+
 if __name__ == "__main__":
     unittest.main()

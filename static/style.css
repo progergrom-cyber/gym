@@ -919,3 +919,35 @@ body { font-family: var(--font-body, system-ui, -apple-system, "Segoe UI", Robot
 .me-stats .stat { text-align: center; }
 .top-ava { flex: none; text-decoration: none; }
 .top-ava .avatar { width: 44px; height: 44px; font-size: 18px; box-shadow: 0 0 0 2px var(--accent); }
+
+
+/* ---------- Самочувствие, расписание, свои тренировки, тяжесть подхода ---------- */
+.feel-row { display: flex; gap: 6px; margin-top: 14px; }
+.feel-row .chip-btn { flex: 1; padding: 0 6px; font-size: 15px; }
+.sched-line { margin-top: 10px; }
+.wk-cell.plan { box-shadow: inset 0 0 0 1.5px var(--accent); background: transparent; color: var(--accent); border-style: dashed; }
+.tpl-list { margin-top: 8px; }
+.tpl-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+.tpl-row:first-child { border-top: 0; }
+.tpl-row .grow { flex: 1; min-width: 0; }
+.tpl-row small { display: block; color: var(--muted); font-size: 13px; }
+.timer { flex-wrap: wrap; }
+.timer > .effort {
+  flex: 0 0 100%; display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--timer-track);
+}
+.effort span { font-size: 13px; color: var(--muted); margin-right: auto; }
+.effort button {
+  min-height: 38px; padding: 0 10px; border: 0; border-radius: 99px; background: var(--overlay-btn);
+  color: inherit; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.effort button.on { background: var(--violet); color: var(--timer-ink); }
+.day-picks { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.day-picks button {
+  min-height: 46px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2);
+  color: var(--muted); font: inherit; font-weight: 700; cursor: pointer;
+}
+.day-picks button.on { background: var(--accent); color: var(--accent-ink); }
+.sched-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sched-card .btn.wide { margin-top: 10px; }
+.sched-card h3 { font-size: 17px; }

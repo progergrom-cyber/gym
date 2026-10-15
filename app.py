@@ -145,6 +145,7 @@ def profile_dict(user):
         "share": None if user["share"] is None else bool(user["share"]),
         "is_admin": bool(user["is_admin"]),
         "avatar_url": avatar_url(user["avatar"]),
+        "schedule": json.loads(user["schedule"]) if user["schedule"] else None,
     }
 
 
@@ -270,6 +271,29 @@ def me():
 NEXT_KIND = {"upper": "lower", "lower": "upper", "glutes": "upper"}
 
 
+def next_kind(kind, few):
+    if kind == "full":
+        return "full" if few else "upper"
+    return NEXT_KIND.get(kind, "full")
+
+
+def schedule_week(schedule, today, monday, trained, suggest, few):
+    """Тренировки по расписанию с сегодняшнего дня до конца недели:
+    [{"date", "kind"}]. Типы чередуются, начиная с сегодняшнего совета."""
+    if not schedule:
+        return []
+    out, kind = [], suggest
+    start = date.fromisoformat(monday)
+    for i in range(7):
+        d = start + timedelta(days=i)
+        if d < today or i not in schedule["days"] or d.isoformat() in trained:
+            continue
+        out.append({"date": d.isoformat(), "kind": kind,
+                    "kind_label": planner.KINDS[kind]})
+        kind = next_kind(kind, few)
+    return out
+
+
 def week_info(conn, user):
     """Посещения на этой неделе, прошлая тренировка и совет на сегодня."""
     today = date.today()
@@ -325,7 +349,10 @@ def week_info(conn, user):
         suggest = "full" if few else "upper"
     else:
         suggest = NEXT_KIND.get(last["kind"], "full")
+    schedule = json.loads(user["schedule"]) if user["schedule"] else None
     return {
+        "schedule": schedule_week(schedule, today, monday, days, suggest, few),
+        "today_planned": (today.weekday() in schedule["days"]) if schedule else None,
         "visits": visits,
         "goal": user["freq"],
         "suggest": suggest,
@@ -426,6 +453,200 @@ def delete_avatar():
     conn.commit()
     remove_photo_file(g.user["avatar"])
     return jsonify(ok=True)
+
+
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+@app.put("/api/profile/schedule")
+@login_required
+def update_schedule():
+    """Дни недели (0 — понедельник) и время тренировки."""
+    data = body()
+    try:
+        days = sorted({int(d) for d in data.get("days") or []})
+    except (TypeError, ValueError):
+        raise ApiError("Не поняли дни недели")
+    if any(not 0 <= d <= 6 for d in days):
+        raise ApiError("Не поняли дни недели")
+    time = data.get("time") or "19:00"
+    if not TIME_RE.match(time):
+        raise ApiError("Время в формате 19:00")
+    minutes = data.get("minutes") if data.get("minutes") in (30, 45, 60, 90) else 60
+    schedule = {"days": days, "time": time, "minutes": minutes} if days else None
+    conn = get_db()
+    conn.execute("UPDATE users SET schedule=? WHERE id=?",
+                 (json.dumps(schedule) if schedule else None, g.user["id"]))
+    conn.commit()
+    return jsonify(ok=True, schedule=schedule)
+
+
+@app.get("/api/calendar")
+@login_required
+def calendar_link():
+    """Секретная ссылка на календарь с расписанием (создаётся один раз)."""
+    token = g.user["cal_token"]
+    if not token:
+        token = secrets.token_urlsafe(18)
+        conn = get_db()
+        conn.execute("UPDATE users SET cal_token=? WHERE id=?", (token, g.user["id"]))
+        conn.commit()
+    return jsonify(path=f"/cal/{token}.ics")
+
+
+@app.post("/api/calendar/reset")
+@login_required
+def calendar_reset():
+    """Новая ссылка — старая перестанет работать (если ею кто-то поделился)."""
+    conn = get_db()
+    conn.execute("UPDATE users SET cal_token=NULL WHERE id=?", (g.user["id"],))
+    conn.commit()
+    return jsonify(ok=True)
+
+
+ICS_DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+
+
+def ics_text(s):
+    return (s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+            .replace("\n", "\\n"))
+
+
+@app.get("/cal/<token>.ics")
+def calendar_feed(token):
+    """Календарь для телефона: повторяющееся событие в дни тренировок
+    с напоминанием за 30 минут. Телефон сам перечитывает его, поэтому
+    изменения расписания подтягиваются без повторной подписки."""
+    conn = get_db()
+    user = conn.execute("SELECT * FROM users WHERE cal_token=? AND blocked=0",
+                        (token,)).fetchone() if token else None
+    if not user:
+        return jsonify(error="Календарь не найден"), 404
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//trainergym//RU",
+             "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+             "X-WR-CALNAME:" + ics_text("Тренировки"),
+             "REFRESH-INTERVAL;VALUE=DURATION:PT12H", "X-PUBLISHED-TTL:PT12H"]
+    schedule = json.loads(user["schedule"]) if user["schedule"] else None
+    if schedule:
+        today = date.today()
+        first = next(today + timedelta(days=i) for i in range(7)
+                     if (today + timedelta(days=i)).weekday() in schedule["days"])
+        hh, mm = schedule["time"].split(":")
+        start = f"{first.strftime('%Y%m%d')}T{hh}{mm}00"
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:gym-{user['id']}@trainergym",
+            "DTSTAMP:" + date.today().strftime("%Y%m%d") + "T000000Z",
+            "DTSTART:" + start,
+            f"DURATION:PT{schedule.get('minutes', 60)}M",
+            "RRULE:FREQ=WEEKLY;BYDAY=" + ",".join(ICS_DAYS[d] for d in schedule["days"]),
+            "SUMMARY:" + ics_text("Тренировка 💪"),
+            "DESCRIPTION:" + ics_text("План на сегодня: " + request.host_url),
+            "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT30M",
+            "DESCRIPTION:" + ics_text("Через 30 минут тренировка"), "END:VALARM",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    resp = app.response_class("\r\n".join(lines) + "\r\n",
+                              mimetype="text/calendar")
+    resp.headers["Content-Disposition"] = "inline; filename=trainergym.ics"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+# ---------- свои тренировки-шаблоны ----------
+
+MAX_TEMPLATES = 20
+
+
+def template_dict(conn, row):
+    ids = json.loads(row["ex_ids"])
+    names = {r[0]: r[1] for r in conn.execute(
+        f"SELECT id, name FROM exercises WHERE id IN ({','.join('?' * len(ids))})",
+        ids)} if ids else {}
+    return {"id": row["id"], "name": row["name"], "kind": row["kind"],
+            "kind_label": planner.KINDS.get(row["kind"], row["kind"]),
+            "minutes": row["minutes"],
+            "exercises": [names[i] for i in ids if i in names]}
+
+
+@app.get("/api/templates")
+@login_required
+def list_templates():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM templates WHERE user_id=? ORDER BY id DESC",
+                        (g.user["id"],)).fetchall()
+    return jsonify(items=[template_dict(conn, r) for r in rows])
+
+
+@app.post("/api/templates")
+@login_required
+def create_template():
+    data = body()
+    name = (data.get("name") or "").strip()[:60]
+    if not name:
+        raise ApiError("Назовите тренировку")
+    kind = data.get("kind") if data.get("kind") in planner.KINDS else "full"
+    minutes = data.get("minutes") if data.get("minutes") in (30, 45, 60, 90) else 60
+    conn = get_db()
+    known = {r[0] for r in conn.execute("SELECT id FROM exercises")}
+    ids = []
+    for i in data.get("ex_ids") or []:
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        if i in known and i not in ids:
+            ids.append(i)
+    if not ids:
+        raise ApiError("В тренировке нет упражнений")
+    count = conn.execute("SELECT COUNT(*) FROM templates WHERE user_id=?",
+                         (g.user["id"],)).fetchone()[0]
+    if count >= MAX_TEMPLATES:
+        raise ApiError(f"Можно сохранить не больше {MAX_TEMPLATES} тренировок — удалите старую")
+    cur = conn.execute(
+        "INSERT INTO templates (user_id, name, kind, minutes, ex_ids) VALUES (?,?,?,?,?)",
+        (g.user["id"], name, kind, minutes, json.dumps(ids[:30])))
+    conn.commit()
+    row = conn.execute("SELECT * FROM templates WHERE id=?", (cur.lastrowid,)).fetchone()
+    return jsonify(ok=True, item=template_dict(conn, row))
+
+
+@app.delete("/api/templates/<int:tid>")
+@login_required
+def delete_template(tid):
+    conn = get_db()
+    conn.execute("DELETE FROM templates WHERE id=? AND user_id=?", (tid, g.user["id"]))
+    conn.commit()
+    return jsonify(ok=True)
+
+
+@app.post("/api/templates/<int:tid>/plan")
+@login_required
+def plan_from_template(tid):
+    """План из своей тренировки: те же упражнения, свежие подсказки веса."""
+    data = body()
+    conn = get_db()
+    uid = g.user["id"]
+    row = conn.execute("SELECT * FROM templates WHERE id=? AND user_id=?",
+                       (tid, uid)).fetchone()
+    if not row:
+        raise ApiError("Тренировка не найдена", 404)
+    feel = get_feel(data)
+    profile, note = feel_profile(conn, g.user, feel)
+    plan = planner.plan_from_ids(
+        db.exercises_for(conn, uid), profile, row["minutes"], row["kind"],
+        json.loads(row["ex_ids"]), history=db.exercise_history(conn, uid),
+        notes=db.user_notes(conn, uid))
+    if not plan["items"]:
+        raise ApiError("Упражнений из этой тренировки больше нет в каталоге")
+    apply_feel_note(plan, note)
+    plan["workout_id"] = start_workout(conn, uid, data.get("date"), row["kind"],
+                                       row["minutes"], feel=feel)
+    plan["date"] = valid_date(data.get("date"))
+    plan["feel"] = feel
+    plan["template"] = row["name"]
+    return jsonify(plan=plan)
 
 
 @app.get("/api/measurements")
@@ -801,6 +1022,40 @@ def admin_photos():
 
 # ---------- план и дневник ----------
 
+FEELS = ("fresh", "ok", "tired")
+# Облегчать план из-за усталости — не чаще раза в столько дней
+TIRED_EVERY_DAYS = 7
+
+
+def feel_profile(conn, user, feel):
+    """Профиль для планировщика с учётом самочувствия и подсказка к плану.
+    «Устал» — на подход меньше и без прибавки веса. Если план уже облегчали
+    на этой неделе — объём обычный, только без прибавки (чтобы «устал»
+    каждый раз не остановил прогресс)."""
+    profile = profile_dict(user)
+    if feel != "tired":
+        return profile, None
+    since = (date.today() - timedelta(days=TIRED_EVERY_DAYS - 1)).isoformat()
+    recent = conn.execute(
+        "SELECT 1 FROM workouts WHERE user_id=? AND status='done' AND feel='tired' "
+        "AND date >= ?", (user["id"], since)).fetchone()
+    profile["no_increase"] = True
+    if recent:
+        return profile, ("На этой неделе план уже облегчали из-за усталости — "
+                         "сегодня обычный объём, но без прибавки веса.")
+    profile["tired"] = True
+    return profile, "Вы отметили усталость: на подход меньше и без прибавки веса."
+
+
+def get_feel(data):
+    return data.get("feel") if data.get("feel") in FEELS else None
+
+
+def apply_feel_note(plan, note):
+    if note:
+        plan["warnings"].insert(0, note)
+
+
 @app.post("/api/plan")
 @login_required
 def make_plan():
@@ -813,23 +1068,28 @@ def make_plan():
         raise ApiError("Выберите тип тренировки")
     conn = get_db()
     uid = g.user["id"]
-    profile = profile_dict(g.user)
+    feel = get_feel(data)
+    profile, note = feel_profile(conn, g.user, feel)
     plan = planner.build_plan(
         db.exercises_for(conn, uid), profile, minutes, kind,
         recent_ids=db.recent_exercise_ids(conn, uid),
         history=db.exercise_history(conn, uid),
         notes=db.user_notes(conn, uid))
-    plan["workout_id"] = start_workout(conn, uid, data.get("date"), kind, minutes)
+    apply_feel_note(plan, note)
+    plan["workout_id"] = start_workout(conn, uid, data.get("date"), kind, minutes,
+                                       feel=feel)
     plan["date"] = valid_date(data.get("date"))
+    plan["feel"] = feel
     return jsonify(plan=plan)
 
 
-def start_workout(conn, uid, day, kind, minutes, pair_id=None):
+def start_workout(conn, uid, day, kind, minutes, pair_id=None, feel=None):
     # Незавершённые старые планы больше не нужны
     conn.execute("DELETE FROM workouts WHERE user_id=? AND status='planned'", (uid,))
     cur = conn.execute(
-        "INSERT INTO workouts (user_id, date, kind, minutes, pair_id) VALUES (?,?,?,?,?)",
-        (uid, valid_date(day), kind, minutes, pair_id))
+        "INSERT INTO workouts (user_id, date, kind, minutes, pair_id, feel) "
+        "VALUES (?,?,?,?,?,?)",
+        (uid, valid_date(day), kind, minutes, pair_id, feel))
     conn.commit()
     return cur.lastrowid
 
@@ -911,10 +1171,13 @@ def create_pair():
         recent_ids=db.recent_exercise_ids(conn, me_row["id"]),
         history=db.exercise_history(conn, me_row["id"]),
         notes=db.user_notes(conn, me_row["id"]))
-    # Подходы/повторы — по моей цели, а «ограничения» в карточках — только мои
+    # Подходы/повторы — по моей цели и самочувствию, «ограничения» — только мои
+    feel = get_feel(data)
+    mine_profile, note = feel_profile(conn, me_row, feel)
     plan = planner.plan_from_ids(
-        mine, profile, minutes, kind, [i["exercise_id"] for i in plan["items"]],
+        mine, mine_profile, minutes, kind, [i["exercise_id"] for i in plan["items"]],
         history=db.exercise_history(conn, me_row["id"]), notes=db.user_notes(conn, me_row["id"]))
+    apply_feel_note(plan, note)
     conn.execute("UPDATE pair_sessions SET status='cancelled' WHERE host_id=? "
                  "AND status='invited'", (me_row["id"],))
     cur = conn.execute(
@@ -928,8 +1191,9 @@ def create_pair():
     conn.executemany("INSERT INTO pair_members (pair_id, user_id) VALUES (?,?)",
                      [(pair_id, p["id"]) for p in partners])
     plan["workout_id"] = start_workout(conn, me_row["id"], data.get("date"), kind,
-                                       minutes, pair_id)
+                                       minutes, pair_id, feel)
     plan["date"] = valid_date(data.get("date"))
+    plan["feel"] = feel
     plan["pair"] = pair_info(conn, pair_id, me_row["id"], "host")
     return jsonify(plan=plan)
 
@@ -954,16 +1218,20 @@ def join_pair(pid):
             or p["status"] not in ("invited", "active")):
         raise ApiError("Это приглашение уже неактуально")
     uid = g.user["id"]
+    feel = get_feel(data)
+    profile, note = feel_profile(conn, g.user, feel)
     plan = planner.plan_from_ids(
-        db.exercises_for(conn, uid), profile_dict(g.user), p["minutes"], p["kind"],
+        db.exercises_for(conn, uid), profile, p["minutes"], p["kind"],
         json.loads(p["ex_ids"]), history=db.exercise_history(conn, uid),
         notes=db.user_notes(conn, uid))
+    apply_feel_note(plan, note)
     conn.execute("UPDATE pair_members SET status='active' WHERE pair_id=? AND user_id=?",
                  (pid, uid))
     conn.execute("UPDATE pair_sessions SET status='active' WHERE id=?", (pid,))
     plan["workout_id"] = start_workout(conn, uid, data.get("date"), p["kind"],
-                                       p["minutes"], pid)
+                                       p["minutes"], pid, feel)
     plan["date"] = valid_date(data.get("date"))
+    plan["feel"] = feel
     plan["pair"] = pair_info(conn, pid, uid, "guest")
     return jsonify(plan=plan)
 
@@ -1086,11 +1354,11 @@ def finish_workout(wid):
                 (pair_id, uid)).fetchone():
             pair_id = None
         cur = conn.execute(
-            "INSERT INTO workouts (user_id, date, kind, minutes, pair_id) "
-            "VALUES (?,?,?,?,?)",
+            "INSERT INTO workouts (user_id, date, kind, minutes, pair_id, feel) "
+            "VALUES (?,?,?,?,?,?)",
             (uid, valid_date(data.get("date")),
              data.get("kind") if data.get("kind") in planner.KINDS else "full",
-             int(data.get("minutes") or 60), pair_id))
+             int(data.get("minutes") or 60), pair_id, get_feel(data)))
         wid = cur.lastrowid
     known = {r[0] for r in conn.execute("SELECT id FROM exercises")}
     rows = []
@@ -1102,8 +1370,9 @@ def finish_workout(wid):
             set_no = int(s.get("set_no") or 1)
         except (KeyError, TypeError, ValueError):
             continue
+        effort = s.get("effort") if s.get("effort") in (1, 2, 3) else None
         if ex_id in known and 0 < reps <= 200 and 0 <= weight <= 1000:
-            rows.append((wid, ex_id, set_no, weight, reps))
+            rows.append((wid, ex_id, set_no, weight, reps, effort))
     notes = {}
     for ex_id, note in (data.get("notes") or {}).items():
         try:
@@ -1115,7 +1384,7 @@ def finish_workout(wid):
     db.save_notes(conn, uid, notes)
     conn.execute("DELETE FROM sets WHERE workout_id=?", (wid,))
     conn.executemany("INSERT INTO sets (workout_id, exercise_id, set_no, "
-                     "weight, reps) VALUES (?,?,?,?,?)", rows)
+                     "weight, reps, effort) VALUES (?,?,?,?,?,?)", rows)
     if rows:
         conn.execute("UPDATE workouts SET status='done', "
                      "finished_at=datetime('now') WHERE id=?", (wid,))

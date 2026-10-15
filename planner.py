@@ -5,7 +5,7 @@
 """
 import random
 
-from progression import suggest
+from progression import fmt, suggest
 
 # Группы мышц: ключ -> (название по-русски, «большая» ли группа)
 MUSCLES = {
@@ -107,8 +107,13 @@ GOAL_PARAMS = {
 }
 
 
-def prescribe(ex, goal, freq, minutes):
-    """Сколько подходов/повторов/отдыха делать в этом упражнении."""
+# Самочувствие «устал»: план короче, без прибавки веса
+TIRED_BUDGET = 0.85
+
+
+def prescribe(ex, goal, freq, minutes, tired=False):
+    """Сколько подходов/повторов/отдыха делать в этом упражнении.
+    tired — человек отметил, что устал: на подход меньше."""
     params = GOAL_PARAMS.get(goal, GOAL_PARAMS["hypertrophy"])
     sets, lo, hi, rest = params[ex["kind"]]
     # Реже ходишь — больше объём за одну тренировку, чаще — меньше.
@@ -119,6 +124,8 @@ def prescribe(ex, goal, freq, minutes):
     elif freq >= 5:
         sets -= 1
     if minutes <= 30 and ex["kind"] == "isolation":
+        sets -= 1
+    if tired:
         sets -= 1
     sets = max(2, min(5, sets))
     return {"sets": sets, "rep_lo": lo, "rep_hi": hi, "rest": rest}
@@ -135,11 +142,18 @@ def risky_zones(ex, injuries):
 
 
 def _item(ex, profile, minutes, history, extra_sets=0, notes=None):
-    p = prescribe(ex, profile["goal"], profile["freq"], minutes)
+    p = prescribe(ex, profile["goal"], profile["freq"], minutes,
+                  profile.get("tired", False))
     p["sets"] += extra_sets
     sessions = history.get(ex["id"]) or []
     hint = suggest(ex, sessions[0]["sets"] if sessions else None,
                    p["rep_lo"], p["rep_hi"], sessions)
+    if profile.get("no_increase") and sessions and hint["weight"] and not hint.get("deload"):
+        work = max((w or 0 for w, r in sessions[0]["sets"] if r), default=0)
+        if hint["weight"] > work > 0:
+            hint = {"weight": work,
+                    "text": f"Сегодня без прибавки: оставь {fmt(work)} кг. "
+                            f"Прибавишь, когда будут силы."}
     return {
         "exercise_id": ex["id"],
         "name": ex["name"],
@@ -186,7 +200,8 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
     history = history or {}
     recent = set(recent_ids)
     injuries = set(profile.get("injuries") or [])
-    budget = minutes * 60
+    tired = profile.get("tired", False)
+    budget = minutes * 60 * (TIRED_BUDGET if tired else 1)
     warnings = []
 
     pool = [e for e in exercises
@@ -223,7 +238,7 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
 
         for e in sorted(cands, key=score):
             sec = exercise_seconds(
-                prescribe(e, profile["goal"], profile["freq"], minutes))
+                prescribe(e, profile["goal"], profile["freq"], minutes, tired))
             if spent + sec <= budget:
                 return e, sec
         return None
@@ -267,9 +282,10 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
                                order[e["id"]]))
 
     # Если время ещё осталось (упражнений в каталоге мало) —
-    # добавляем по одному подходу, начиная с базовых упражнений.
+    # добавляем по одному подходу, начиная с базовых упражнений
+    # (если человек устал — не добавляем).
     extra = {}
-    for ex in chosen:
+    for ex in ([] if tired else chosen):
         p = prescribe(ex, profile["goal"], profile["freq"], minutes)
         add = SET_SETUP_SEC + p["rep_hi"] * SEC_PER_REP + p["rest"]
         if p["sets"] < 5 and spent + add <= budget:

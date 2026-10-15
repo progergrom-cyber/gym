@@ -15,6 +15,11 @@ let plan = store.get('plan');   // текущий план хранится в �
 // Вид плана: 'focus' — по одному упражнению на экран, 'list' — всё списком
 let view = store.get('view', 'focus') === 'list' ? 'list' : 'focus';
 const MAX_PARTNERS = 2;
+const FEELS = [['tired', '😴 Устал'], ['ok', '🙂 Норм'], ['fresh', '⚡ Бодр']];
+const EFFORTS = [[1, '😌', 'легко'], [2, '🙂', 'норм'], [3, '😤', 'тяжело']];
+const EFFORT_EMOJI = { 1: '😌', 2: '🙂', 3: '😤' };
+const DAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+let lastSet = null;   // {i, j} — последний сделанный подход (для отметки «как дался»)
 
 function save() { store.set('plan', plan); }
 
@@ -69,13 +74,16 @@ function renderWeek(week) {
   const [y, m, d] = week.monday.split('-').map(Number);
   const today = todayISO();
   const byDate = Object.fromEntries((week.days || []).map(x => [x.date, x.kinds]));
+  const planned = Object.fromEntries((week.schedule || []).map(x => [x.date, x.kind]));
   const cells = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((name, i) => {
     const dt = new Date(y, m - 1, d + i);
     const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
     const kinds = byDate[iso];
-    const cls = [kinds ? 'v' : '', iso === today ? 'now' : '', iso > today ? 'future' : ''].join(' ');
+    const cls = [kinds ? 'v' : '', iso === today ? 'now' : '', iso > today ? 'future' : '',
+      !kinds && planned[iso] ? 'plan' : ''].join(' ');
     return `<div class="wk-day"><span class="wk-name">${name}</span>
-      <span class="wk-cell ${cls}">${kinds ? kinds.map(k => KIND_LETTER[k] || '•').join('') : dt.getDate()}</span></div>`;
+      <span class="wk-cell ${cls}">${kinds ? kinds.map(k => KIND_LETTER[k] || '•').join('')
+        : planned[iso] ? KIND_LETTER[planned[iso]] : dt.getDate()}</span></div>`;
   }).join('');
   const pct = Math.min(100, week.visits / week.goal * 100);
   return `
@@ -116,7 +124,9 @@ function currentChoice() {
   // Свой выбор типа держим только сегодня, назавтра снова советуем
   const kind = c.kindDate === todayISO() && KINDS[c.kind] ? c.kind
     : (week && week.suggest) || 'full';
-  return { minutes: MINUTES.includes(c.minutes) ? c.minutes : 60, kind, own: kind !== (week && week.suggest) };
+  const feel = c.feelDate === todayISO() && FEELS.some(([k]) => k === c.feel) ? c.feel : 'ok';
+  return { minutes: MINUTES.includes(c.minutes) ? c.minutes : 60, kind, feel,
+    own: kind !== (week && week.suggest) };
 }
 
 function renderSetup(message) {
@@ -150,12 +160,19 @@ function renderSetup(message) {
       <div class="today-kind">${KINDS[choice.kind]}</div>
       <div class="small muted">${esc(KIND_HINTS[choice.kind])}${week && week.last
         ? ` · в прошлый раз: ${esc(week.last.kind_label)}, ${daysAgo(week.last.date)}` : ''}</div>
+      ${scheduleLine(week)}
+      <div class="feel-row" id="feel" role="group" aria-label="Самочувствие">
+        ${FEELS.map(([k, label]) => `<button type="button" data-v="${k}"
+          class="chip-btn ${k === choice.feel ? 'on' : ''}">${label}</button>`).join('')}
+      </div>
       <div class="chips-row" id="minutes" role="group" aria-label="Время тренировки">
         ${MINUTES.map(m => `<button type="button" data-v="${m}"
           class="chip-btn ${m === choice.minutes ? 'on' : ''}">${m}${m === choice.minutes ? ' мин' : ''}</button>`).join('')}
       </div>
       <button class="btn primary big" id="make" type="button">Начать</button>
       <button class="link-btn" id="other-kind" type="button">другой тип тренировки ›</button>
+      <button class="link-btn" id="tpl-open" type="button">⭐ мои тренировки ›</button>
+      <div id="tpl-box" hidden><div class="tpl-list" id="tpl-list"><span class="small muted">Загрузка…</span></div></div>
       <button class="link-btn" id="pair-open" type="button">👥 тренироваться вместе ›</button>
       <div id="pair-box" hidden>
         <div class="small muted" style="margin-top:6px">С кем идёте? Можно выбрать одного или двух
@@ -170,7 +187,8 @@ function renderSetup(message) {
       </div>
     </div>
 
-    ${week && week.last && week.last.exercises !== undefined ? renderLast(week.last) : ''}
+    ${week && week.last && week.last.exercises !== undefined ? renderLast(week.last)
+      + '<button class="btn ghost wide" id="share-last" type="button">📸 Поделиться итогом</button>' : ''}
 
     <a class="card profile-line" href="/settings">
       <div class="grow">
@@ -204,6 +222,18 @@ function renderSetup(message) {
     renderSetup();
   });
   $('#make').addEventListener('click', makePlan);
+  $('#feel').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const c = store.get('choice', {});
+    c.feel = b.dataset.v;
+    c.feelDate = todayISO();
+    store.set('choice', c);
+    $('#feel').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  });
+  $('#tpl-open').addEventListener('click', toggleTemplates);
+  $('#tpl-list').addEventListener('click', onTemplateClick);
+  if ($('#share-last')) $('#share-last').addEventListener('click', () => shareCard(me.week.last));
 
   $('#pair-open').addEventListener('click', async () => {
     const box = $('#pair-box');
@@ -240,6 +270,89 @@ function renderSetup(message) {
   }
 }
 
+// Строка про расписание: сегодня по плану или отдых, что дальше
+function scheduleLine(week) {
+  const sched = (me && me.profile && me.profile.schedule) || null;
+  if (!sched || !week) return '';
+  const next = (week.schedule || []).filter(d => d.date !== todayISO()).slice(0, 2)
+    .map(d => {
+      const [y, m, dd] = d.date.split('-').map(Number);
+      return `${DAY_SHORT[(new Date(y, m - 1, dd).getDay() + 6) % 7]} — ${d.kind_label.toLowerCase()}`;
+    });
+  const today = week.today_planned
+    ? 'По расписанию сегодня тренировка'
+    : 'По расписанию сегодня отдых — но можно и потренироваться';
+  return `<div class="small muted sched-line">📅 ${esc(today)}${next.length
+    ? `. Дальше: ${esc(next.join(', '))}` : ''}</div>`;
+}
+
+// ---------- свои тренировки ----------
+
+async function toggleTemplates() {
+  const box = $('#tpl-box');
+  box.hidden = !box.hidden;
+  if (box.hidden) return;
+  try {
+    const { items } = await api('GET', '/api/templates');
+    $('#tpl-list').innerHTML = items.length ? items.map(t => `
+      <div class="tpl-row">
+        <div class="grow"><b>${esc(t.name)}</b>
+          <small>${esc(t.kind_label)} · ${t.minutes} мин · ${esc(t.exercises.slice(0, 3).join(', '))}${
+            t.exercises.length > 3 ? ` и ещё ${t.exercises.length - 3}` : ''}</small></div>
+        <button class="btn small primary" type="button" data-tpl="${t.id}">Начать</button>
+        <button class="icon-btn" type="button" data-tpl-del="${t.id}" aria-label="Удалить «${esc(t.name)}»">✕</button>
+      </div>`).join('')
+      : `<span class="small muted">Пока пусто. Во время тренировки откройте «Все упражнения» и
+          нажмите «Сохранить как свою тренировку» — потом её можно будет повторить отсюда.</span>`;
+  } catch (e) {
+    $('#tpl-list').innerHTML = `<span class="small muted">${esc(e.message)}</span>`;
+  }
+}
+
+async function onTemplateClick(e) {
+  const del = e.target.closest('[data-tpl-del]');
+  if (del) {
+    if (!confirm('Удалить эту тренировку из списка?')) return;
+    try {
+      await api('DELETE', `/api/templates/${del.dataset.tplDel}`);
+      $('#tpl-box').hidden = true;
+      toggleTemplates();
+    } catch (err) { toast(err.message); }
+    return;
+  }
+  const b = e.target.closest('[data-tpl]');
+  if (!b) return;
+  b.disabled = true;
+  b.textContent = 'Составляю…';
+  try {
+    await flushPending();
+    const res = await api('POST', `/api/templates/${b.dataset.tpl}/plan`,
+      { date: todayISO(), feel: currentChoice().feel });
+    startPlan(res.plan);
+  } catch (err) {
+    toast(err.message, 4000);
+    b.disabled = false;
+    b.textContent = 'Начать';
+  }
+}
+
+async function saveTemplate() {
+  if (!plan || !plan.items.length) { toast('В плане нет упражнений'); return; }
+  const name = prompt('Как назвать тренировку?', plan.template || `${plan.kind_label} · ${plan.items.length} упр.`);
+  if (name === null) return;
+  try {
+    await api('POST', '/api/templates', {
+      name, kind: plan.kind, minutes: plan.minutes,
+      ex_ids: plan.items.map(i => i.exercise_id),
+    });
+    plan.template = name.trim();
+    save();
+    toast('Сохранено. Повторить можно на главной: «мои тренировки»', 4000);
+  } catch (e) {
+    toast(e.message, 4000);
+  }
+}
+
 function chosenPartners() {
   return [...$('#pair-users').querySelectorAll('button.on')].map(b => b.dataset.user);
 }
@@ -269,6 +382,7 @@ async function invitePartner() {
     await flushPending();
     const res = await api('POST', '/api/pair', {
       partners: chosenPartners(), minutes: choice.minutes, kind: choice.kind, date: todayISO(),
+      feel: choice.feel,
     });
     startPlan(res.plan);
     toast(`Приглашение отправлено: ${res.plan.pair.partner}. Оно появится у них на главной`, 5000);
@@ -285,7 +399,8 @@ async function joinPair() {
   btn.textContent = 'Загружаю план…';
   try {
     await flushPending();
-    const res = await api('POST', `/api/pair/${me.pair_invite.id}/join`, { date: todayISO() });
+    const res = await api('POST', `/api/pair/${me.pair_invite.id}/join`,
+      { date: todayISO(), feel: currentChoice().feel });
     me.pair_invite = null;
     startPlan(res.plan);
   } catch (e) {
@@ -345,7 +460,7 @@ async function makePlan() {
   try {
     await flushPending();  // сначала отправим прошлую тренировку, если она ждёт
     const res = await api('POST', '/api/plan',
-      { minutes: choice.minutes, kind: choice.kind, date: todayISO() });
+      { minutes: choice.minutes, kind: choice.kind, date: todayISO(), feel: choice.feel });
     startPlan(res.plan);
   } catch (e) {
     toast(e.message, 4000);
@@ -492,7 +607,8 @@ function renderExercise(idx) {
 
     ${doneSets.length ? `<div class="done-sets">
       ${doneSets.map(s => `<button type="button" class="done-chip" data-j="${s.j}"
-        aria-label="Исправить подход ${s.j + 1}">${s.j + 1}: ${fmtNum(s.weight)} × ${s.reps} ✓</button>`).join('')}
+        aria-label="Исправить подход ${s.j + 1}">${s.j + 1}: ${fmtNum(s.weight)} × ${s.reps} ${
+          EFFORT_EMOJI[s.effort] || '✓'}</button>`).join('')}
       <div class="small muted" style="width:100%">Нажмите на подход, чтобы исправить</div>
     </div>` : ''}
 
@@ -585,7 +701,8 @@ function renderItem(item, idx) {
         <div class="set-head"><span>#</span><span>Вес, кг</span><span>Повторы</span><span></span></div>
         ${item.log.map((s, j) => `
           <div class="set ${s.done ? 'done' : ''}" data-j="${j}">
-            <span class="set-no">${j + 1}</span>
+            <span class="set-no" ${s.effort ? `title="${EFFORTS[s.effort - 1][2]}"` : ''}>${
+              s.done && EFFORT_EMOJI[s.effort] ? EFFORT_EMOJI[s.effort] : j + 1}</span>
             <input class="w" inputmode="decimal" autocomplete="off" aria-label="Вес, подход ${j + 1}"
               value="${esc(shown(s.weight))}" placeholder="кг" ${s.done ? 'readonly' : ''}>
             <input class="r" inputmode="numeric" autocomplete="off" aria-label="Повторы, подход ${j + 1}"
@@ -623,6 +740,7 @@ function renderList() {
     ${plan.items.length ? '' : '<div class="note warn">В плане нет упражнений.</div>'}
     <button class="btn ghost wide" id="overview" type="button">☰ Порядок упражнений</button>
     <button class="btn ghost wide" id="add-ex" type="button">＋ Добавить упражнение</button>
+    <button class="btn ghost wide" id="save-tpl" type="button">⭐ Сохранить как свою тренировку</button>
     <button class="btn primary big" id="finish" type="button">Завершить тренировку</button>
     <button class="btn ghost wide danger" id="cancel" type="button">Отменить план</button>`;
 }
@@ -700,6 +818,7 @@ root.addEventListener('click', e => {
   if (photo) { showPhoto(photo.dataset.photo); return; }
   if (t.closest('#overview')) { openOverview(); return; }
   if (t.closest('#add-ex')) { openAddDialog(); return; }
+  if (t.closest('#save-tpl')) { saveTemplate(); return; }
   if (t.closest('#cancel')) { cancelPlan(); return; }
   if (t.closest('#warmup-next')) {
     plan.warmup_idx = ((plan.warmup_idx || 0) + 1) % plan.warmup.length;
@@ -729,7 +848,9 @@ root.addEventListener('click', e => {
   } else if (t.closest('.set-done')) {
     completeSet(item, idx);
   } else if (t.closest('.done-chip')) {
-    item.log[Number(t.closest('.done-chip').dataset.j)].done = false;
+    const s = item.log[Number(t.closest('.done-chip').dataset.j)];
+    s.done = false;
+    delete s.effort;
     save();
     renderPlan();
   } else if (t.closest('.add-set')) {
@@ -767,6 +888,7 @@ function toggleSet(item, idx, j) {
   if (!s) return;
   if (s.done) {
     s.done = false;
+    delete s.effort;
     save();
     renderPlan();
     return;
@@ -790,6 +912,7 @@ function toggleSet(item, idx, j) {
   });
   plan.cur = idx;
   pairSyncAt = 0;
+  lastSet = { i: idx, j };
   save();
   renderPlan();
   if (plan.items.every(isDone)) {
@@ -812,6 +935,7 @@ function completeSet(item, idx) {
   s.weight = weight ?? 0;
   s.reps = reps;
   s.done = true;
+  lastSet = { i: idx, j: item.log.indexOf(s) };
   // Вес и повторы переносим в следующие подходы
   item.log.forEach(x => { if (!x.done) { x.weight = s.weight; x.reps = s.reps; } });
 
@@ -896,6 +1020,7 @@ function openOverview() {
         <p class="small muted" style="margin:4px 0 0">Стрелки меняют порядок. Нажмите на название, чтобы перейти.</p>
         <div class="ov-list"></div>
         <button class="btn ghost wide ov-add" type="button">＋ Добавить упражнение</button>
+        <button class="btn ghost wide ov-tpl" type="button">⭐ Сохранить как свою тренировку</button>
         <button class="btn ghost wide danger ov-cancel" type="button">Отменить план</button>
         <button class="btn primary wide ov-close" type="button">Закрыть</button>
       </div>`;
@@ -906,6 +1031,7 @@ function openOverview() {
       const i = Number(b.dataset.i);
       if (b.classList.contains('ov-close')) dlg.close();
       else if (b.classList.contains('ov-add')) { dlg.close(); openAddDialog(); }
+      else if (b.classList.contains('ov-tpl')) { saveTemplate(); }
       else if (b.classList.contains('ov-cancel')) { dlg.close(); cancelPlan(); }
       else if (b.classList.contains('ov-go')) { dlg.close(); go(i); }
       else if (b.classList.contains('ov-up')) { moveExercise(i, -1); fillOverview(dlg); }
@@ -1015,7 +1141,10 @@ function addExercise(id) {
 async function finishWorkout() {
   const sets = [];
   plan.items.forEach(item => item.log.forEach((s, j) => {
-    if (s.done) sets.push({ exercise_id: item.exercise_id, set_no: j + 1, weight: s.weight || 0, reps: s.reps });
+    if (s.done) {
+      sets.push({ exercise_id: item.exercise_id, set_no: j + 1, weight: s.weight || 0, reps: s.reps,
+        effort: s.effort || null });
+    }
   }));
   if (!sets.length) {
     if (confirm('Ни один подход не отмечен. Удалить план без сохранения?')) clearPlan();
@@ -1028,7 +1157,7 @@ async function finishWorkout() {
     workout_id: plan.workout_id,
     payload: {
       date: plan.date, kind: plan.kind, minutes: plan.minutes, sets,
-      notes: plan.notes || {}, pair_id: plan.pair ? plan.pair.id : null,
+      notes: plan.notes || {}, pair_id: plan.pair ? plan.pair.id : null, feel: plan.feel || null,
     },
   });
   store.set('pending', queue);
@@ -1057,6 +1186,168 @@ function clearPlan(silent) {
   if (!silent) { renderSetup(); window.scrollTo(0, 0); }
 }
 
+// ---------- картинка-итог для сторис ----------
+
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+const PETAL = 'M0 -1.5C-3.6 -4 -3.6 -8.6 -1.4 -10.4L0 -8.9L1.4 -10.4C3.6 -8.6 3.6 -4 0 -1.5Z';
+const CLAW = ['M18 4L30 6L24 60L34 62L22 120L30 122L12 196L14 124L6 122L14 64L4 62Z',
+  'M52 0L64 3L58 64L68 66L56 128L64 130L46 200L48 130L40 128L48 66L38 64Z',
+  'M84 8L96 10L90 62L98 64L88 118L95 120L78 190L80 122L73 120L80 66L72 64Z'];
+
+function drawBloom(x, cx, cy, scale, color) {
+  x.save();
+  x.translate(cx, cy);
+  x.scale(scale, scale);
+  x.fillStyle = color;
+  const p = new Path2D(PETAL);
+  for (let k = 0; k < 5; k++) { x.fill(p); x.rotate(Math.PI * 2 / 5); }
+  x.fillStyle = '#d63a6e';
+  x.beginPath(); x.arc(0, 0, 1.8, 0, Math.PI * 2); x.fill();
+  x.restore();
+}
+
+// Украшение под выбранную тему
+function drawDecor(x, W, H, theme, accent) {
+  x.save();
+  if (theme === 'sakura') {
+    [[880, 180, 9, '#f7b6c6'], [1000, 330, 7, '#fbd3dd'], [760, 90, 6, '#fbd3dd'],
+      [150, 1700, 8, '#f7b6c6'], [300, 1820, 5, '#fbd3dd']].forEach(([cx, cy, s, c]) => drawBloom(x, cx, cy, s, c));
+  } else if (theme === 'supra') {
+    x.fillStyle = accent;
+    x.beginPath(); x.moveTo(800, 0); x.lineTo(900, 0); x.lineTo(560, H); x.lineTo(460, H); x.fill();
+    x.beginPath(); x.moveTo(930, 0); x.lineTo(965, 0); x.lineTo(625, H); x.lineTo(590, H); x.fill();
+    x.globalAlpha = .9;
+  } else if (theme === 'monster' || theme === 'monster-white') {
+    x.globalAlpha = theme === 'monster' ? .35 : .12;
+    x.fillStyle = theme === 'monster' ? accent : '#000';
+    x.translate(700, 80);
+    x.scale(3.4, 3.4);
+    CLAW.forEach(d => x.fill(new Path2D(d)));
+  } else {
+    x.globalAlpha = .18;
+    x.fillStyle = accent;
+    x.beginPath(); x.arc(W - 80, 260, 380, 0, Math.PI * 2); x.fill();
+  }
+  x.restore();
+}
+
+function loadImage(src) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function fitText(x, text, maxW, size, font) {
+  let s = size;
+  do { x.font = font.replace('{s}', s); s -= 6; } while (x.measureText(text).width > maxW && s > 30);
+}
+
+async function shareCard(last) {
+  if (!last) return;
+  const btn = $('#share-last');
+  if (btn) { btn.disabled = true; btn.textContent = 'Рисую картинку…'; }
+  try {
+    const W = 1080, H = 1920;
+    const theme = document.documentElement.dataset.theme || 'lime';
+    const bg = cssVar('--bg', '#0b0c0f'), surface = cssVar('--surface', '#15171c');
+    const text = cssVar('--text', '#fff'), muted = cssVar('--muted', '#999');
+    const accent = cssVar('--accent', '#d4ff3a');
+    const head = cssVar('--font-head', 'system-ui, sans-serif');
+    const bodyF = cssVar('--font-body', 'system-ui, sans-serif');
+    try { await Promise.all([document.fonts.load(`700 100px ${head}`), document.fonts.load(`600 40px ${bodyF}`)]); } catch (e) { /* шрифт по умолчанию */ }
+
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    x.fillStyle = bg; x.fillRect(0, 0, W, H);
+    drawDecor(x, W, H, theme, accent);
+
+    // кто и когда
+    const p = me.profile;
+    const ava = p.avatar_url ? await loadImage(p.avatar_url) : null;
+    x.save();
+    x.beginPath(); x.arc(150, 190, 70, 0, Math.PI * 2); x.closePath();
+    x.fillStyle = surface; x.fill(); x.clip();
+    if (ava) {
+      const k = Math.max(140 / ava.width, 140 / ava.height);
+      x.drawImage(ava, 150 - ava.width * k / 2, 190 - ava.height * k / 2, ava.width * k, ava.height * k);
+    } else {
+      x.fillStyle = accent; x.font = `700 70px ${head}`; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillText(p.username.slice(0, 1).toUpperCase(), 150, 194);
+    }
+    x.restore();
+    x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+    x.fillStyle = text; x.font = `700 56px ${bodyF}`;
+    x.fillText(p.username, 250, 180);
+    x.fillStyle = muted; x.font = `500 40px ${bodyF}`;
+    x.fillText(fmtDate(last.date), 250, 235);
+
+    // тип тренировки — крупно
+    x.fillStyle = accent;
+    fitText(x, last.kind_label, W - 160, 230, `700 {s}px ${head}`);
+    x.fillText(last.kind_label, 80, 640);
+
+    // цифры
+    const stats = [[fmtKg(last.volume), 'поднято за тренировку'], [String(last.sets), 'подходов'],
+      [String(last.exercises), 'упражнений']];
+    let y = 860;
+    stats.forEach(([v, l], i) => {
+      x.fillStyle = text; x.font = `700 ${i ? 110 : 150}px ${head}`;
+      x.fillText(v, 80, y);
+      x.fillStyle = muted; x.font = `500 42px ${bodyF}`;
+      x.fillText(l, 80, y + 60);
+      y += i ? 230 : 270;
+    });
+
+    // рекорды
+    const recs = (last.records || []).slice(0, 3);
+    if (recs.length) {
+      x.fillStyle = surface;
+      const boxH = 90 + recs.length * 70;
+      x.fillRect(60, y - 40, W - 120, boxH);
+      x.fillStyle = accent; x.font = `700 46px ${bodyF}`;
+      x.fillText(recs.length > 1 ? `⭐ ${recs.length} рекорда` : '⭐ Новый рекорд', 100, y + 20);
+      x.fillStyle = text; x.font = `500 40px ${bodyF}`;
+      recs.forEach((r, i) => {
+        const line = `${r.name} — ${fmtNum(r.weight)} кг`;
+        fitText(x, line, W - 220, 40, `500 {s}px ${bodyF}`);
+        x.fillText(line, 100, y + 90 + i * 70);
+      });
+      y += boxH + 40;
+    }
+    if (last.partner) {
+      x.fillStyle = muted; x.font = `500 40px ${bodyF}`;
+      x.fillText(`👥 вместе с ${last.partner}`, 80, Math.min(y + 20, H - 200));
+    }
+    x.fillStyle = muted; x.font = `500 34px ${bodyF}`;
+    x.fillText(location.host, 80, H - 90);
+
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    const file = new File([blob], `trenirovka-${last.date}.png`, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Моя тренировка' }); } catch (e) { /* отменили */ }
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = file.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast('Картинка сохранена — её можно выложить в сторис');
+    }
+  } catch (e) {
+    toast('Не получилось нарисовать картинку');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📸 Поделиться итогом'; }
+  }
+}
+
 // ---------- таймер отдыха (кольцо) ----------
 
 let timerEnd = store.get('timer_end');
@@ -1066,6 +1357,7 @@ let audioCtx = null;
 const RING_C = 2 * Math.PI * 21;
 
 function startTimer(sec) {
+  showEffort();
   timerEnd = Date.now() + sec * 1000;
   timerTotal = sec;
   store.set('timer_end', timerEnd);
@@ -1109,6 +1401,28 @@ function stopTimer() {
   store.del('timer_end');
   $('#timer').hidden = true;
 }
+
+// «Как дался подход?» — в таймере отдыха, для последнего сделанного подхода
+function showEffort() {
+  const box = $('#effort');
+  const s = lastSet && plan && plan.items[lastSet.i] && plan.items[lastSet.i].log[lastSet.j];
+  box.hidden = !s || !s.done;
+  if (box.hidden) return;
+  box.innerHTML = '<span>Как подход?</span>' + EFFORTS.map(([v, emoji, label]) =>
+    `<button type="button" data-effort="${v}" class="${s.effort === v ? 'on' : ''}"
+      aria-pressed="${s.effort === v}">${emoji} ${label}</button>`).join('');
+}
+
+$('#effort').addEventListener('click', e => {
+  const b = e.target.closest('[data-effort]');
+  const s = lastSet && plan && plan.items[lastSet.i] && plan.items[lastSet.i].log[lastSet.j];
+  if (!b || !s) return;
+  const v = Number(b.dataset.effort);
+  s.effort = s.effort === v ? undefined : v;
+  save();
+  showEffort();
+  renderPlan();
+});
 
 function beep() {
   if (!audioCtx) return;

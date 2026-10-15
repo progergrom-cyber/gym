@@ -132,6 +132,63 @@ $('#p-form').addEventListener('submit', async e => {
 
 $('#logout').addEventListener('click', logout);
 
+// ---------- расписание и календарь ----------
+
+function fillSchedule(sched) {
+  const days = (sched && sched.days) || [];
+  $('#s-days').querySelectorAll('button').forEach(b => {
+    const on = days.includes(Number(b.dataset.d));
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on);
+  });
+  if (sched) {
+    $('#s-time').value = sched.time;
+    $('#s-min').value = String(sched.minutes || 60);
+  }
+  if (sched) loadCalendar(); else $('#cal-box').hidden = true;
+}
+
+async function loadCalendar() {
+  try {
+    const { path } = await api('GET', '/api/calendar');
+    const https = location.origin + path;
+    const webcal = https.replace(/^https?:/, 'webcal:');
+    $('#cal-ios').href = webcal;
+    $('#cal-google').href = 'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(webcal);
+    $('#cal-file').href = path;
+    $('#cal-box').hidden = false;
+  } catch (e) { /* без связи — кнопок не будет */ }
+}
+
+$('#s-days').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  b.classList.toggle('on');
+  b.setAttribute('aria-pressed', b.classList.contains('on'));
+});
+
+$('#s-save').addEventListener('click', async () => {
+  const days = [...$('#s-days').querySelectorAll('button.on')].map(b => Number(b.dataset.d));
+  try {
+    const res = await api('PUT', '/api/profile/schedule',
+      { days, time: $('#s-time').value || '19:00', minutes: Number($('#s-min').value) });
+    store.set('me', await api('GET', '/api/me'));
+    fillSchedule(res.schedule);
+    toast(res.schedule ? 'Расписание сохранено ✓' : 'Расписание выключено');
+  } catch (err) {
+    toast(err.message, 4000);
+  }
+});
+
+$('#cal-reset').addEventListener('click', async () => {
+  if (!confirm('Сделать новую ссылку? В календаре придётся подписаться заново.')) return;
+  try {
+    await api('POST', '/api/calendar/reset', {});
+    await loadCalendar();
+    toast('Новая ссылка готова — добавьте календарь заново');
+  } catch (err) { toast(err.message); }
+});
+
 // ---------- оформление ----------
 
 function renderThemes() {
@@ -372,6 +429,7 @@ renderNav('settings');
   let me;
   try { me = await requireAuth(); } catch (e) { return; }
   fillProfile(me.profile);
+  fillSchedule(me.profile.schedule);
   showTab(location.hash === '#catalog' ? 'catalog' : 'profile');
   loadSummary();
   loadCatalog();
