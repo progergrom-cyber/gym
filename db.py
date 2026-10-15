@@ -225,24 +225,24 @@ def all_exercises(conn):
     return [exercise_to_dict(r) for r in rows]
 
 
-def last_sets(conn, user_id):
-    """{exercise_id: [(вес, повторы), ...]} — с последней тренировки,
-    где это упражнение выполнялось."""
+def exercise_history(conn, user_id, per_exercise=6):
+    """{exercise_id: [{"date": ..., "sets": [(вес, повторы), ...]}, ...]} —
+    последние тренировки с этим упражнением, сначала новые."""
     rows = conn.execute(
         """
-        SELECT s.exercise_id, s.weight, s.reps, s.workout_id
+        SELECT s.exercise_id, s.weight, s.reps, w.id AS wid, w.date
         FROM sets s JOIN workouts w ON w.id = s.workout_id
         WHERE w.user_id = ? AND w.status = 'done'
-          AND s.workout_id = (
-              SELECT w2.id FROM workouts w2 JOIN sets s2 ON s2.workout_id = w2.id
-              WHERE w2.user_id = ? AND w2.status = 'done'
-                AND s2.exercise_id = s.exercise_id
-              ORDER BY w2.date DESC, w2.id DESC LIMIT 1)
-        ORDER BY s.set_no
-        """, (user_id, user_id)).fetchall()
+        ORDER BY w.date DESC, w.id DESC, s.set_no
+        """, (user_id,)).fetchall()
     out = {}
     for r in rows:
-        out.setdefault(r["exercise_id"], []).append((r["weight"], r["reps"]))
+        sessions = out.setdefault(r["exercise_id"], [])
+        if not sessions or sessions[-1]["wid"] != r["wid"]:
+            if len(sessions) >= per_exercise:
+                continue
+            sessions.append({"wid": r["wid"], "date": r["date"], "sets": []})
+        sessions[-1]["sets"].append((r["weight"], r["reps"]))
     return out
 
 

@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import planner  # noqa: E402
 from catalog_seed import SEED  # noqa: E402
-from progression import suggest  # noqa: E402
+from progression import is_plateau, suggest  # noqa: E402
 
 
 def catalog(include_spares=False):
@@ -203,6 +203,50 @@ class ProgressionTests(unittest.TestCase):
     def test_keep_when_not_all_at_top(self):
         self.assertEqual(suggest(self.press, [(50, 12), (50, 10), (50, 9)],
                                  8, 12)["weight"], 50)
+
+
+def sessions(*items):
+    """sessions(("2026-10-20", [(50, 10)]), ...) — сначала новые."""
+    return [{"date": d, "sets": sets} for d, sets in items]
+
+
+class PlateauTests(unittest.TestCase):
+    press = {"kind": "compound", "equipment": "Matrix"}
+    stuck = sessions(("2026-10-20", [(50, 9)] * 3), ("2026-10-13", [(50, 10)] * 3),
+                     ("2026-10-06", [(50, 10)] * 3), ("2026-09-29", [(50, 10)] * 3))
+
+    def hint(self, history):
+        return suggest(self.press, history[0]["sets"], 8, 12, history)
+
+    def test_deload_after_three_sessions_without_progress(self):
+        self.assertTrue(is_plateau(self.stuck))
+        h = self.hint(self.stuck)
+        self.assertTrue(h["deload"])
+        self.assertEqual(h["weight"], 45)
+
+    def test_no_plateau_when_growing_or_little_data(self):
+        growing = sessions(("2026-10-20", [(50, 11)]), ("2026-10-13", [(50, 10)]),
+                           ("2026-10-06", [(50, 10)]), ("2026-09-29", [(50, 10)]))
+        self.assertFalse(is_plateau(growing))
+        self.assertFalse(is_plateau(self.stuck[:3]))
+        self.assertNotIn("deload", self.hint(self.stuck[:3]))
+
+    def test_no_plateau_after_long_break(self):
+        broke = self.stuck[:3] + sessions(("2026-08-01", [(50, 10)] * 3))
+        self.assertFalse(is_plateau(broke))
+
+    def test_return_to_work_weight_after_deload(self):
+        after = sessions(("2026-10-27", [(45, 12)] * 3)) + self.stuck
+        h = self.hint(after)
+        self.assertEqual(h["weight"], 50)
+        self.assertNotIn("deload", h)
+        # Разгрузка в окне — плато не засчитываем ещё раз
+        later = sessions(("2026-11-03", [(50, 10)] * 3)) + after
+        self.assertFalse(is_plateau(later))
+
+    def test_bodyweight_never_deloads(self):
+        bw = [dict(s, sets=[(0, 10)] * 3) for s in self.stuck]
+        self.assertFalse(is_plateau(bw))
 
 
 if __name__ == "__main__":

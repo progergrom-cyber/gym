@@ -266,15 +266,7 @@ function renderCharts() {
   }
   renderExerciseChart();
 
-  // Баланс мышц
-  const rows = stats.muscles;
-  const maxSets = Math.max(1, ...rows.map(r => r.sets));
-  $('#muscle-bars').innerHTML = rows.length ? `<div class="hbars">${rows.map(r => `
-    <div class="hbar-row ${r.sets ? '' : 'zero'}">
-      <span class="hbar-l">${esc(r.label)}</span>
-      <span class="hbar-track"><i style="width:${r.sets / maxSets * 100}%"></i></span>
-      <span class="hbar-v">${r.sets}</span>
-    </div>`).join('')}</div>` : '<p class="muted">Нет данных</p>';
+  renderMuscleWeeks();
 }
 
 function renderExerciseChart() {
@@ -308,6 +300,303 @@ function renderExerciseChart() {
   });
 }
 $('#ex-select').addEventListener('change', renderExerciseChart);
+
+// ---------- нагрузка на мышцы за неделю ----------
+
+let muscleWeek = null;   // индекс выбранной недели (по умолчанию — текущая)
+
+// Схема тела: спереди и сзади. Каждая фигура — 100×200, мышцы — ключи из planner.MUSCLES.
+const BODY_BASE = `
+  <circle cx="50" cy="16" r="10"/><rect x="45" y="24" width="10" height="9" rx="3"/>
+  <path d="M30 34 Q50 29 70 34 L68 92 Q50 99 32 92 Z"/>
+  <path d="M32 90 Q50 98 68 90 L69 106 Q50 112 31 106 Z"/>
+  <ellipse cx="24" cy="54" rx="6.5" ry="16"/><ellipse cx="76" cy="54" rx="6.5" ry="16"/>
+  <ellipse cx="20" cy="84" rx="5" ry="14"/><ellipse cx="80" cy="84" rx="5" ry="14"/>
+  <ellipse cx="41" cy="130" rx="9.5" ry="25"/><ellipse cx="59" cy="130" rx="9.5" ry="25"/>
+  <ellipse cx="40" cy="173" rx="6.5" ry="20"/><ellipse cx="60" cy="173" rx="6.5" ry="20"/>`;
+const BODY_FRONT = {
+  delts_side: '<ellipse cx="29" cy="38" rx="7" ry="6"/><ellipse cx="71" cy="38" rx="7" ry="6"/>',
+  chest: '<path d="M37 39 Q44 36 49 39 L49 52 Q42 55 36 50 Z"/><path d="M63 39 Q56 36 51 39 L51 52 Q58 55 64 50 Z"/>',
+  biceps: '<ellipse cx="24" cy="55" rx="4.5" ry="11"/><ellipse cx="76" cy="55" rx="4.5" ry="11"/>',
+  abs: '<rect x="43" y="57" width="14" height="32" rx="4"/>',
+  quads: '<ellipse cx="41" cy="127" rx="8" ry="21"/><ellipse cx="59" cy="127" rx="8" ry="21"/>',
+};
+const BODY_BACK = {
+  delts_rear: '<ellipse cx="29" cy="38" rx="7" ry="6"/><ellipse cx="71" cy="38" rx="7" ry="6"/>',
+  back_mid: '<path d="M40 36 L60 36 L58 56 L42 56 Z"/>',
+  back_lats: '<path d="M34 45 L41 50 L43 72 Q37 70 34 62 Z"/><path d="M66 45 L59 50 L57 72 Q63 70 66 62 Z"/>',
+  triceps: '<ellipse cx="24" cy="55" rx="4.5" ry="11"/><ellipse cx="76" cy="55" rx="4.5" ry="11"/>',
+  lower_back: '<rect x="44" y="60" width="12" height="28" rx="4"/>',
+  glutes: '<ellipse cx="42" cy="101" rx="9" ry="8"/><ellipse cx="58" cy="101" rx="9" ry="8"/>',
+  hamstrings: '<ellipse cx="41" cy="131" rx="7.5" ry="18"/><ellipse cx="59" cy="131" rx="7.5" ry="18"/>',
+  calves: '<ellipse cx="40" cy="168" rx="5.5" ry="13"/><ellipse cx="60" cy="168" rx="5.5" ry="13"/>',
+};
+
+function muscleLevel(sets, row) {
+  if (!sets) return 'none';
+  if (sets < row.lo) return 'low';
+  if (sets > row.hi) return 'high';
+  return 'ok';
+}
+
+function bodyFigure(x, label, parts, rows, wi) {
+  const byKey = Object.fromEntries(rows.map(r => [r.muscle, r]));
+  const muscles = Object.entries(parts).map(([k, shapes]) => {
+    const r = byKey[k];
+    const sets = r ? r.sets[wi] : 0;
+    const title = r ? `${r.label}: ${sets} ${plural(sets, ['подход', 'подхода', 'подходов'])}` : '';
+    return `<g class="m ${r ? muscleLevel(sets, r) : 'none'}"><title>${esc(title)}</title>${shapes}</g>`;
+  }).join('');
+  return `<g transform="translate(${x} 0)"><g class="base">${BODY_BASE}</g>${muscles}
+    <text x="50" y="205">${label}</text></g>`;
+}
+
+function renderMuscleWeeks() {
+  const mw = stats.muscle_weeks;
+  if (muscleWeek === null || muscleWeek >= mw.weeks.length) muscleWeek = mw.weeks.length - 1;
+  const wi = muscleWeek;
+  $('#mw-weeks').innerHTML = mw.weeks.map((w, i) => {
+    const d = parseISO(w);
+    const label = i === mw.weeks.length - 1 ? 'Эта' : `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return `<button type="button" data-w="${i}" class="${i === wi ? 'on' : ''}">${label}</button>`;
+  }).join('');
+
+  const rows = mw.rows;
+  $('#body-map').innerHTML = `<svg viewBox="0 0 220 210" role="img" aria-label="Схема нагрузки на мышцы">
+    ${bodyFigure(5, 'спереди', BODY_FRONT, rows, wi)}${bodyFigure(115, 'сзади', BODY_BACK, rows, wi)}</svg>`;
+
+  const level = r => muscleLevel(r.sets[wi], r);
+  const names = lvl => rows.filter(r => level(r) === lvl).map(r => r.label.split(':')[0].split(' (')[0].toLowerCase());
+  const ok = rows.filter(r => level(r) === 'ok').length;
+  const lacking = [...new Set([...names('none'), ...names('low')])];
+  const mon = parseISO(mw.weeks[wi]);
+  const current = wi === mw.weeks.length - 1;
+  let text = `<b>${esc(weekRange(mon))}${current ? ' (неделя ещё идёт)' : ''}</b><br>` +
+    `В норме ${ok} из ${rows.length} групп.`;
+  if (lacking.length) text += ` Не хватает: ${esc(lacking.slice(0, 5).join(', '))}${lacking.length > 5 ? '…' : '.'}`;
+  if (names('high').length) text += ` Многовато: ${esc(names('high').join(', '))}.`;
+  $('#mw-caption').innerHTML = text;
+
+  const sorted = [...rows].sort((a, b) => b.sets[wi] - a.sets[wi]);
+  $('#muscle-bars').innerHTML = `<div class="hbars">${sorted.map(r => {
+    const sets = r.sets[wi];
+    const scale = Math.max(r.hi * 1.25, sets, 1);
+    const lvl = level(r);
+    return `<div class="hbar-row ${sets ? '' : 'zero'}" title="Норма ${r.lo}–${r.hi} подходов в неделю">
+      <span class="hbar-l">${esc(r.label)}</span>
+      <span class="hbar-track">
+        <span class="norm" style="left:${r.lo / scale * 100}%;width:${(r.hi - r.lo) / scale * 100}%"></span>
+        <i class="${lvl}" style="width:${sets / scale * 100}%"></i></span>
+      <span class="hbar-v ${lvl}">${sets}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+$('#mw-weeks').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  muscleWeek = Number(b.dataset.w);
+  renderMuscleWeeks();
+});
+
+// ---------- итоги месяца (картинка, чтобы поделиться) ----------
+
+let summaryMonth = (() => {
+  const d = new Date();
+  // В первые дни месяца интереснее итоги прошлого
+  if (d.getDate() <= 5) d.setMonth(d.getMonth() - 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+})();
+let summary = null;
+
+function shiftMonth(month, n) {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+async function loadSummary() {
+  const cur = todayISO().slice(0, 7);
+  $('#sum-next').disabled = summaryMonth >= cur;
+  try {
+    summary = await api('GET', `/api/summary?month=${summaryMonth}`);
+  } catch (e) {
+    summary = null;
+    $('#sum-title').textContent = 'Итоги месяца';
+    $('#sum-actions').hidden = true;
+    toast(e.message);
+    return;
+  }
+  const t = summary.title;
+  $('#sum-title').textContent = 'Итоги: ' + t;
+  $('#sum-actions').hidden = !summary.workouts;
+  drawSummary();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Обрезать текст с «…», чтобы влез в ширину
+function fitText(ctx, text, max) {
+  if (ctx.measureText(text).width <= max) return text;
+  while (text.length > 1 && ctx.measureText(text + '…').width > max) text = text.slice(0, -1);
+  return text.trimEnd() + '…';
+}
+
+function cardKg(v) {
+  return v >= 1000 ? `${fmtNum(Math.round(v / 100) / 10)} т` : `${Math.round(v)} кг`;
+}
+
+function drawSummary() {
+  const s = summary;
+  const canvas = $('#sum-card');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const css = getComputedStyle(document.documentElement);
+  const c = name => css.getPropertyValue(name).trim();
+  const font = (size, weight = 700) => `${weight} ${size}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  const P = 80;
+
+  ctx.fillStyle = c('--bg');
+  ctx.fillRect(0, 0, W, H);
+  const glow = ctx.createRadialGradient(W - 120, 120, 0, W - 120, 120, 700);
+  glow.addColorStop(0, c('--accent-soft'));
+  glow.addColorStop(1, 'transparent');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = c('--accent');
+  ctx.font = font(34);
+  ctx.fillText('ИТОГИ МЕСЯЦА', P, 130);
+  ctx.fillStyle = c('--text');
+  ctx.font = font(92, 800);
+  ctx.fillText(s.title[0].toUpperCase() + s.title.slice(1), P, 230);
+  ctx.fillStyle = c('--muted');
+  ctx.font = font(38, 500);
+  ctx.fillText('@' + s.username, P, 290);
+
+  if (!s.workouts) {
+    ctx.fillStyle = c('--muted');
+    ctx.font = font(44, 600);
+    ctx.fillText('В этом месяце тренировок не было', P, 520);
+    ctx.font = font(36, 500);
+    ctx.fillText('Самое время начать 💪', P, 590);
+    return;
+  }
+
+  // Пока месяц идёт, сравнивать с целым прошлым месяцем нечестно
+  const running = s.month === todayISO().slice(0, 7);
+  const diff = (now, before, unit) => {
+    if (running) return '';
+    if (!before) return '';
+    const d = now - before;
+    if (!d) return 'как в прошлом месяце';
+    return `${d > 0 ? '▲' : '▼'} ${unit(Math.abs(d))} к прошлому`;
+  };
+  const tiles = [
+    [String(s.visits), plural(s.visits, ['посещение', 'посещения', 'посещений']),
+      diff(s.visits, s.prev.visits, n => n)],
+    [cardKg(s.volume), 'общий тоннаж', diff(s.volume, s.prev.volume, cardKg)],
+    [String(s.sets), plural(s.sets, ['подход', 'подхода', 'подходов']), running ? 'месяц ещё идёт' : ''],
+    [String(s.records_count), plural(s.records_count, ['рекорд', 'рекорда', 'рекордов']),
+      s.weeks_goal ? `${s.weeks_goal} ${plural(s.weeks_goal, ['неделя', 'недели', 'недель'])} с целью` : ''],
+  ];
+  const tw = (W - P * 2 - 30) / 2;
+  const th = 230;
+  tiles.forEach(([value, label, sub], i) => {
+    const x = P + (i % 2) * (tw + 30);
+    const y = 350 + Math.floor(i / 2) * (th + 30);
+    ctx.fillStyle = c('--surface');
+    roundRect(ctx, x, y, tw, th, 36);
+    ctx.fill();
+    ctx.fillStyle = c('--accent');
+    ctx.font = font(84, 800);
+    ctx.fillText(fitText(ctx, value, tw - 80), x + 40, y + 105);
+    ctx.fillStyle = c('--text');
+    ctx.font = font(34, 600);
+    ctx.fillText(label, x + 40, y + 155);
+    if (sub) {
+      ctx.fillStyle = c('--muted');
+      ctx.font = font(28, 500);
+      ctx.fillText(fitText(ctx, sub, tw - 80), x + 40, y + 198);
+    }
+  });
+
+  let y = 920;
+  ctx.fillStyle = c('--text');
+  ctx.font = font(40, 800);
+  ctx.fillText(s.records.length ? 'Лучшие рекорды' : 'Рекорды ещё впереди 💪', P, y);
+  y += 30;
+  s.records.slice(0, 3).forEach(r => {
+    y += 70;
+    const right = `${fmtNum(r.from)} → ${fmtNum(r.to)} кг`;
+    ctx.font = font(36, 700);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = c('--accent');
+    ctx.fillText(right, W - P, y);
+    const rw = ctx.measureText(right).width;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = c('--text');
+    ctx.font = font(36, 500);
+    ctx.fillText(fitText(ctx, '⭐ ' + r.name, W - P * 2 - rw - 30), P, y);
+  });
+
+  ctx.fillStyle = c('--muted');
+  ctx.font = font(32, 500);
+  ctx.textAlign = 'left';
+  if (s.favorite) ctx.fillText(`Чаще всего: ${s.favorite}`, P, H - 90);
+  ctx.textAlign = 'right';
+  ctx.fillText('🏋️ Тренер для зала', W - P, H - 90);
+  ctx.textAlign = 'left';
+}
+
+function summaryFile() {
+  return new Promise((resolve, reject) => {
+    $('#sum-card').toBlob(blob => blob
+      ? resolve(new File([blob], `itogi-${summaryMonth}.png`, { type: 'image/png' }))
+      : reject(new Error('Не удалось сохранить картинку')), 'image/png');
+  });
+}
+
+function downloadFile(file) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+$('#sum-share').addEventListener('click', async () => {
+  try {
+    const file = await summaryFile();
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: `Итоги: ${summary.title}` });
+    } else {
+      downloadFile(file);
+      toast('Телефон не умеет делиться картинкой — сохранили файл');
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') toast(e.message);
+  }
+});
+$('#sum-save').addEventListener('click', async () => {
+  try { downloadFile(await summaryFile()); } catch (e) { toast(e.message); }
+});
+$('#sum-prev').addEventListener('click', () => { summaryMonth = shiftMonth(summaryMonth, -1); loadSummary(); });
+$('#sum-next').addEventListener('click', () => { summaryMonth = shiftMonth(summaryMonth, 1); loadSummary(); });
 
 // ---------- вкладка «Посещения» ----------
 
@@ -560,6 +849,7 @@ renderNav('progress');
   const tab = location.hash.slice(1);
   showTab(TABS.includes(tab) ? tab : 'charts');
   loadStats();
+  loadSummary();
   loadWorkouts();
   loadMeasurements();
 })();

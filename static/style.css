@@ -176,6 +176,7 @@ a { color: var(--accent); }
   font-size: 14px; color: var(--violet); background: var(--violet-soft);
   padding: 10px 12px; border-radius: 12px;
 }
+.hint.deload { color: var(--warn); background: var(--warn-soft); }
 .sets { margin-top: 12px; }
 .set-head, .set {
   display: grid; grid-template-columns: 26px 1fr 1fr 52px; gap: 8px; align-items: center;
@@ -377,6 +378,39 @@ canvas.chart { width: 100%; height: 220px; display: block; }
 .hbar-track i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
 .hbar-v { font-size: 13px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 .hbar-row.zero .hbar-l, .hbar-row.zero .hbar-v { color: var(--muted); }
+
+/* Нагрузка на мышцы за неделю */
+.week-seg { margin-top: 12px; }
+.body-map { display: flex; justify-content: center; margin-top: 12px; }
+.body-map svg { width: 100%; max-width: 340px; height: auto; display: block; }
+.body-map .base { fill: var(--surface-2); }
+.body-map .m { fill: var(--surface-3); transition: fill .2s, opacity .2s; }
+.body-map .m.low { fill: var(--accent); opacity: .38; }
+.body-map .m.ok { fill: var(--accent); }
+.body-map .m.high { fill: var(--warn); }
+.body-map text { fill: var(--muted); font-size: 9px; text-anchor: middle; }
+.body-legend { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+.body-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.body-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.lg-none { background: var(--surface-3); }
+.lg-low { background: var(--accent); opacity: .38; }
+.lg-ok { background: var(--accent); }
+.lg-high { background: var(--warn); }
+.hbar-track { position: relative; }
+.hbar-track .norm {
+  position: absolute; top: 0; bottom: 0; border-radius: 99px;
+  background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-part);
+}
+.hbar-track i { position: relative; }
+.hbar-track i.low { opacity: .5; }
+.hbar-track i.high { background: var(--warn); }
+.hbar-v.high { color: var(--warn); }
+
+/* Итоги месяца */
+canvas.summary-card {
+  width: 100%; height: auto; aspect-ratio: 4 / 5; display: block;
+  margin: 12px 0; border-radius: var(--radius-sm); background: var(--surface-2);
+}
 
 .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cal-head .icon-btn:disabled { opacity: .3; }
