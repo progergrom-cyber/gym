@@ -743,7 +743,7 @@ def make_plan():
     plan = planner.build_plan(
         db.exercises_for(conn, uid), profile, minutes, kind,
         recent_ids=db.recent_exercise_ids(conn, uid),
-        history=db.last_sets(conn, uid),
+        history=db.exercise_history(conn, uid),
         notes=db.user_notes(conn, uid))
     plan["workout_id"] = start_workout(conn, uid, data.get("date"), kind, minutes)
     plan["date"] = valid_date(data.get("date"))
@@ -835,12 +835,12 @@ def create_pair():
     plan = planner.build_plan(
         everyone, common, minutes, kind,
         recent_ids=db.recent_exercise_ids(conn, me_row["id"]),
-        history=db.last_sets(conn, me_row["id"]),
+        history=db.exercise_history(conn, me_row["id"]),
         notes=db.user_notes(conn, me_row["id"]))
     # Подходы/повторы — по моей цели, а «ограничения» в карточках — только мои
     plan = planner.plan_from_ids(
         mine, profile, minutes, kind, [i["exercise_id"] for i in plan["items"]],
-        history=db.last_sets(conn, me_row["id"]), notes=db.user_notes(conn, me_row["id"]))
+        history=db.exercise_history(conn, me_row["id"]), notes=db.user_notes(conn, me_row["id"]))
     conn.execute("UPDATE pair_sessions SET status='cancelled' WHERE host_id=? "
                  "AND status='invited'", (me_row["id"],))
     cur = conn.execute(
@@ -882,7 +882,7 @@ def join_pair(pid):
     uid = g.user["id"]
     plan = planner.plan_from_ids(
         db.exercises_for(conn, uid), profile_dict(g.user), p["minutes"], p["kind"],
-        json.loads(p["ex_ids"]), history=db.last_sets(conn, uid),
+        json.loads(p["ex_ids"]), history=db.exercise_history(conn, uid),
         notes=db.user_notes(conn, uid))
     conn.execute("UPDATE pair_members SET status='active' WHERE pair_id=? AND user_id=?",
                  (pid, uid))
@@ -1116,15 +1116,15 @@ def stats():
         ({**ex, "points": list(ex["points"].values())} for ex in by_ex.values()),
         key=lambda ex: -len(ex["points"]))
 
-    since = (date.today() - timedelta(days=30)).isoformat()
+    monday = date.today() - timedelta(days=date.today().weekday())
+    weeks = [(monday - timedelta(weeks=i)).isoformat() for i in range(MUSCLE_WEEKS - 1, -1, -1)]
     muscles = conn.execute(
         """
-        SELECT e.muscle, COUNT(*) AS sets
+        SELECT e.muscle, w.date
         FROM sets s JOIN workouts w ON w.id = s.workout_id
         JOIN exercises e ON e.id = s.exercise_id
         WHERE w.user_id = ? AND w.status = 'done' AND w.date >= ?
-        GROUP BY e.muscle ORDER BY sets DESC
-        """, (uid, since)).fetchall()
+        """, (uid, weeks[0])).fetchall()
 
     return jsonify(
         freq=g.user["freq"],
@@ -1133,16 +1133,114 @@ def stats():
                    "sets": w["sets"], "volume": round(w["volume"])}
                   for w in workouts],
         exercises=exercises,
-        muscles=muscle_rows(muscles),
+        muscle_weeks={"weeks": weeks,
+                      "rows": muscle_week_rows(muscles, weeks, g.user["goal"])},
     )
 
 
-def muscle_rows(rows):
-    """Все группы мышц (кроме кардио), включая те, где 0 подходов."""
-    counts = {r["muscle"]: r["sets"] for r in rows}
-    out = [{"muscle": m, "label": label, "sets": counts.get(m, 0)}
-           for m, (label, _big) in planner.MUSCLES.items() if m != "cardio"]
-    return sorted(out, key=lambda r: -r["sets"])
+MUSCLE_WEEKS = 4
+# Сколько рабочих подходов в неделю нужно группе мышц: (от, до).
+# Большим группам — больше, мелким (бицепс, дельты, икры, пресс) — меньше.
+WEEKLY_SETS = {
+    "hypertrophy": {True: (10, 20), False: (6, 14)},
+    "strength": {True: (8, 16), False: (4, 10)},
+    "maintain": {True: (6, 12), False: (3, 8)},
+}
+
+
+def muscle_week_rows(rows, weeks, goal):
+    """Подходы на каждую группу мышц (кроме кардио) по неделям + норма.
+    Считаем только основную мышцу упражнения."""
+    counts = {}
+    for r in rows:
+        day = date.fromisoformat(r["date"])
+        week = (day - timedelta(days=day.weekday())).isoformat()
+        if week in weeks:
+            per = counts.setdefault(r["muscle"], [0] * len(weeks))
+            per[weeks.index(week)] += 1
+    norms = WEEKLY_SETS.get(goal, WEEKLY_SETS["hypertrophy"])
+    return [{"muscle": m, "label": label, "lo": norms[big][0], "hi": norms[big][1],
+             "sets": counts.get(m, [0] * len(weeks))}
+            for m, (label, big) in planner.MUSCLES.items() if m != "cardio"]
+
+
+MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль",
+          "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+
+
+def prev_month(month):
+    y, m = map(int, month.split("-"))
+    return f"{y - 1}-12" if m == 1 else f"{y}-{m - 1:02d}"
+
+
+@app.get("/api/summary")
+@login_required
+def month_summary():
+    """Итоги месяца для карточки «поделиться»."""
+    month = request.args.get("month") or date.today().isoformat()[:7]
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise ApiError("Неверный месяц")
+    conn = get_db()
+    uid = g.user["id"]
+    rows = conn.execute(
+        """
+        SELECT w.id AS wid, w.date, w.kind, s.exercise_id, e.name, s.weight, s.reps
+        FROM workouts w JOIN sets s ON s.workout_id = w.id
+        JOIN exercises e ON e.id = s.exercise_id
+        WHERE w.user_id = ? AND w.status = 'done'
+        ORDER BY w.date, w.id, s.id
+        """, (uid,)).fetchall()
+    all_days = {r["date"] for r in rows}
+
+    def empty():
+        return {"days": set(), "workouts": set(), "sets": 0, "volume": 0.0, "kinds": {}}
+    cur, prev = empty(), empty()
+    best = {}          # лучший вес в упражнении до текущей тренировки
+    records = {}       # exercise_id -> рекорд этого месяца (лучший из них)
+    workout_top = {}
+    for r in rows:
+        m = r["date"][:7]
+        agg = cur if m == month else prev if m == prev_month(month) else None
+        if agg is not None:
+            agg["days"].add(r["date"])
+            if r["wid"] not in agg["workouts"]:
+                agg["workouts"].add(r["wid"])
+                agg["kinds"][r["kind"]] = agg["kinds"].get(r["kind"], 0) + 1
+            agg["sets"] += 1
+            agg["volume"] += r["weight"] * r["reps"]
+        key = (r["wid"], r["exercise_id"])
+        workout_top[key] = max(workout_top.get(key, 0), r["weight"])
+    # Рекорды — как в «Компании»: лучший вес в тренировке выше всех прошлых
+    for (wid, ex_id), top in workout_top.items():   # порядок вставки = по датам
+        prev_best = best.get(ex_id)
+        if prev_best is not None and top > prev_best and wid in cur["workouts"]:
+            rec = records.get(ex_id)
+            start = rec["from"] if rec else prev_best
+            records[ex_id] = {"from": start, "to": top}
+        if prev_best is None or top > prev_best:
+            best[ex_id] = top
+    names = {r["exercise_id"]: r["name"] for r in rows}
+    recs = sorted(({"name": names[ex], "from": v["from"], "to": v["to"]}
+                   for ex, v in records.items()),
+                  key=lambda x: -(x["to"] - x["from"]) / (x["from"] or 1))
+    favorite = max(cur["kinds"], key=cur["kinds"].get) if cur["kinds"] else None
+    # Недели, начавшиеся в этом месяце, где выполнена цель по посещениям
+    y, mnum = map(int, month.split("-"))
+    first = date(y, mnum, 1)
+    monday = first + timedelta(days=(7 - first.weekday()) % 7)
+    weeks_goal = 0
+    while monday.month == mnum:
+        week = {(monday + timedelta(days=i)).isoformat() for i in range(7)}
+        weeks_goal += len(week & all_days) >= g.user["freq"]
+        monday += timedelta(days=7)
+    return jsonify(
+        month=month, title=f"{MONTHS[mnum - 1]} {y}", username=g.user["username"],
+        visits=len(cur["days"]), workouts=len(cur["workouts"]), sets=cur["sets"],
+        volume=round(cur["volume"]), records=recs, records_count=len(recs),
+        favorite=planner.KINDS.get(favorite) if favorite else None,
+        weeks_goal=weeks_goal, freq=g.user["freq"],
+        prev={"visits": len(prev["days"]), "volume": round(prev["volume"])},
+    )
 
 
 ACHIEVEMENTS = [

@@ -147,6 +147,47 @@ class AppTests(unittest.TestCase):
         cat = {e["id"]: e for e in dan.get("/api/exercises").get_json()["items"]}
         self.assertTrue(cat[eid]["mine"])
 
+    def test_deload_hint_in_plan(self):
+        c = new_client("zhenya")
+        press = ex_id("Жим от груди")
+        for day in ("2026-09-01", "2026-09-08", "2026-09-15", "2026-09-22"):
+            finish(c, day, [{"exercise_id": press, "set_no": n, "weight": 50, "reps": 9}
+                            for n in (1, 2, 3)])
+        plan = c.post("/api/plan", json={"minutes": 90, "kind": "upper"}).get_json()["plan"]
+        item = next(i for i in plan["pool"] + plan["items"] if i["exercise_id"] == press)
+        self.assertTrue(item["deload"])
+        self.assertEqual(item["weight"], 45)
+
+    def test_muscle_weeks_and_month_summary(self):
+        from datetime import date, timedelta
+        c = new_client("kira")
+        press = ex_id("Жим от груди")
+        today = date.today()
+        finish(c, today.isoformat(), [{"exercise_id": press, "set_no": n, "weight": 40,
+                                       "reps": 10} for n in (1, 2, 3)])
+        mw = c.get("/api/stats").get_json()["muscle_weeks"]
+        self.assertEqual(len(mw["weeks"]), 4)
+        chest = next(r for r in mw["rows"] if r["muscle"] == "chest")
+        self.assertEqual(chest["sets"][-1], 3)
+        self.assertEqual((chest["lo"], chest["hi"]), (10, 20))
+        self.assertFalse(any(r["muscle"] == "cardio" for r in mw["rows"]))
+
+        month = today.isoformat()[:7]
+        first = today.replace(day=1)
+        last_month = (first - timedelta(days=1)).replace(day=1)
+        finish(c, last_month.isoformat(), [{"exercise_id": press, "set_no": 1,
+                                            "weight": 30, "reps": 10}])
+        finish(c, today.isoformat(), [{"exercise_id": press, "set_no": 1,
+                                       "weight": 45, "reps": 8}])
+        s = c.get(f"/api/summary?month={month}").get_json()
+        self.assertEqual((s["visits"], s["workouts"], s["sets"]), (1, 2, 4))
+        self.assertEqual(s["volume"], 40 * 10 * 3 + 45 * 8)
+        self.assertEqual(s["prev"], {"visits": 1, "volume": 300})
+        self.assertEqual(s["records"], [{"name": "Жим от груди", "from": 30, "to": 45}])
+        self.assertEqual(c.get("/api/summary?month=2026-13").status_code, 400)
+        empty = c.get("/api/summary?month=2020-01").get_json()
+        self.assertEqual((empty["workouts"], empty["records"]), (0, []))
+
     def test_week_info_and_suggestion(self):
         import datetime
         c = new_client("zoya")

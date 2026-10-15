@@ -448,7 +448,7 @@ function renderExercise(idx) {
       <span>отдых ${fmtSec(item.rest)}</span>
       <span>${item.kind === 'compound' ? 'база' : 'изоляция'}</span>
     </div>
-    <div class="hint">${esc(item.hint)}</div>
+    <div class="hint${item.deload ? ' deload' : ''}">${esc(item.hint)}</div>
     ${renderNote(item)}
     ${item.tips && item.tips.length ? `
       <details class="tips" ${item.tipsOpen ? 'open' : ''}>
@@ -565,7 +565,7 @@ function renderItem(item, idx) {
         <span>отдых ${fmtSec(item.rest)}</span>
         <span>${item.kind === 'compound' ? 'база' : 'изоляция'}</span>
       </div>
-      <div class="hint">${esc(item.hint)}</div>
+      <div class="hint${item.deload ? ' deload' : ''}">${esc(item.hint)}</div>
       ${renderNote(item)}
       ${item.tips && item.tips.length ? `
         <details class="tips" ${item.tipsOpen ? 'open' : ''}>

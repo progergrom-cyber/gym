@@ -137,7 +137,9 @@ def risky_zones(ex, injuries):
 def _item(ex, profile, minutes, history, extra_sets=0, notes=None):
     p = prescribe(ex, profile["goal"], profile["freq"], minutes)
     p["sets"] += extra_sets
-    hint = suggest(ex, history.get(ex["id"]), p["rep_lo"], p["rep_hi"])
+    sessions = history.get(ex["id"]) or []
+    hint = suggest(ex, sessions[0]["sets"] if sessions else None,
+                   p["rep_lo"], p["rep_hi"], sessions)
     return {
         "exercise_id": ex["id"],
         "name": ex["name"],
@@ -153,6 +155,7 @@ def _item(ex, profile, minutes, history, extra_sets=0, notes=None):
         "seconds": exercise_seconds(p),
         "weight": hint["weight"],
         "hint": hint["text"],
+        "deload": hint.get("deload", False),
         "tips": [t for t in (ex.get("tips") or "").split("\n") if t.strip()],
         "note": (notes or {}).get(ex["id"], ""),
         "risky": risky_zones(ex, profile.get("injuries") or []),
@@ -175,7 +178,8 @@ def build_plan(exercises, profile, minutes, kind, recent_ids=(), history=None,
                  stress, active, equipment);
     profile    — {"goal", "freq", "injuries"};
     recent_ids — id упражнений из прошлых тренировок (для разнообразия);
-    history    — {exercise_id: [(вес, повторы), ...]} последнего выполнения;
+    history    — {exercise_id: [{"date", "sets": [(вес, повторы), ...]}, ...]} —
+                 последние выполнения, сначала новые (db.exercise_history);
     notes      — {exercise_id: личная заметка}.
     """
     rng = random.Random(seed)
