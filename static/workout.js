@@ -26,6 +26,14 @@ function initLog(item) {
 
 function setTitle(text) { $('#page-title').textContent = text; }
 
+function showTopAvatar() {
+  const p = me && me.profile;
+  const el = $('#top-ava');
+  if (!p || !el) return;
+  el.innerHTML = avatarHtml(p.username, p.avatar_url, 'me');
+  el.hidden = false;
+}
+
 // Кольцо прогресса (неделя, таймер)
 function ring(size, stroke, part, color, label) {
   const r = (size - stroke) / 2;
@@ -118,6 +126,7 @@ function renderSetup(message) {
   const needProfile = me && (!p.height || !me.has_weight);
   const injuries = (p.injuries || []).map(i => INJURY_LABELS[i]).join(', ');
   setTitle(p.username ? `Привет, ${p.username}` : 'Тренировка');
+  showTopAvatar();
 
 
   root.innerHTML = `
@@ -136,7 +145,7 @@ function renderSetup(message) {
     </div>` : ''}
     ${week && week.monday ? renderWeek(week) : ''}
 
-    <div class="hero today-card">
+    <div class="hero today-card" data-kind="${esc(choice.kind)}">
       <div class="small muted">${choice.own ? 'Ваш выбор на сегодня' : 'Сегодня советуем'}</div>
       <div class="today-kind">${KINDS[choice.kind]}</div>
       <div class="small muted">${esc(KIND_HINTS[choice.kind])}${week && week.last
@@ -1166,6 +1175,7 @@ if (timerEnd && timerEnd < Date.now()) { timerEnd = null; store.del('timer_end')
     if (!plan) return;   // без интернета, но план есть — покажем его
   }
   flushPending();
+  showTopAvatar();
   if (plan) renderPlan(); else renderSetup();
   runTimer();
 })();

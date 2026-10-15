@@ -19,10 +19,6 @@ function fmtKg(v) {
   return Math.round(v).toLocaleString('ru-RU') + ' кг';
 }
 
-function initials(name) {
-  return esc(name.slice(0, 1).toUpperCase());
-}
-
 // ---------- согласие ----------
 
 function renderConsent() {
@@ -71,7 +67,7 @@ function renderFeed() {
   $('#feed').innerHTML = hidden + data.feed.map(w => `
     <article class="card feed-item">
       <div class="feed-head">
-        <span class="avatar ${w.me ? 'me' : ''}">${initials(w.username)}</span>
+        ${avatarHtml(w.username, w.avatar_url, w.me ? 'me' : '')}
         <div class="grow">
           <b>${esc(w.username)}${w.me ? ' (вы)' : ''}</b>
           <div class="small muted">${esc(fmtDate(w.date))}</div>
@@ -130,6 +126,7 @@ function renderBoard() {
   $('#board-list').innerHTML = `<div class="board">${data.board.map((b, i) => `
     <div class="board-row ${b.me ? 'me' : ''}">
       <span class="place">${i < 3 && b.visits ? ['🥇', '🥈', '🥉'][i] : i + 1}</span>
+      ${avatarHtml(b.username, b.avatar_url, b.me ? 'me' : '')}
       <span class="grow"><b>${esc(b.username)}</b>${b.me ? ' (вы)' : ''}
         <small>${b.workouts} трен. · ${fmtKg(b.volume)}</small></span>
       <span class="visits"><b>${b.visits}</b><small>посещ.</small></span>

@@ -137,6 +137,7 @@ def init_db(conn):
     add_column(conn, "workouts", "pair_id", "INTEGER")
     add_column(conn, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     add_column(conn, "users", "blocked", "INTEGER NOT NULL DEFAULT 0")
+    add_column(conn, "users", "avatar", "TEXT")
     # Стартовый каталог. Каждое упражнение из SEED добавляется один раз:
     # новые версии приложения дополняют каталог, но не возвращают то,
     # что вы уже переименовали, и не трогают ваши правки.

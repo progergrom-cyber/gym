@@ -144,7 +144,12 @@ def profile_dict(user):
         "injuries": json.loads(user["injuries"] or "[]"),
         "share": None if user["share"] is None else bool(user["share"]),
         "is_admin": bool(user["is_admin"]),
+        "avatar_url": avatar_url(user["avatar"]),
     }
+
+
+def avatar_url(name):
+    return ("/static/photos/" + name) if name else None
 
 
 # ---------- страницы ----------
@@ -352,6 +357,74 @@ def update_profile():
                  "WHERE id=?", (height, goal, freq, json.dumps(injuries),
                                 g.user["id"]))
     conn.commit()
+    return jsonify(ok=True)
+
+
+@app.get("/api/profile/summary")
+@login_required
+def profile_summary():
+    """Цифры для профиля: тренировки, рекорды, недели подряд."""
+    conn = get_db()
+    uid = g.user["id"]
+    dates = [date.fromisoformat(r[0]) for r in conn.execute(
+        "SELECT DISTINCT date FROM workouts WHERE user_id=? AND status='done' "
+        "ORDER BY date", (uid,))]
+    workouts = conn.execute("SELECT COUNT(*) FROM workouts WHERE user_id=? "
+                            "AND status='done'", (uid,)).fetchone()[0]
+    # Рекорд — упражнение, в котором вес стал больше, чем когда-либо раньше
+    records, best = 0, {}
+    for r in conn.execute(
+            "SELECT s.exercise_id, MAX(s.weight) AS top FROM sets s "
+            "JOIN workouts w ON w.id = s.workout_id "
+            "WHERE w.user_id=? AND w.status='done' "
+            "GROUP BY w.id, s.exercise_id ORDER BY w.date, w.id", (uid,)):
+        prev = best.get(r["exercise_id"])
+        if prev is not None and r["top"] > prev:
+            records += 1
+        if prev is None or r["top"] > prev:
+            best[r["exercise_id"]] = r["top"]
+    # Недели подряд: считаем от этой недели (или прошлой, если на этой
+    # ещё не были) назад, пока в каждой неделе есть хотя бы одна тренировка
+    weeks = {d - timedelta(days=d.weekday()) for d in dates}
+    monday = date.today() - timedelta(days=date.today().weekday())
+    if monday not in weeks:
+        monday -= timedelta(days=7)
+    streak = 0
+    while monday in weeks:
+        streak += 1
+        monday -= timedelta(days=7)
+    return jsonify(workouts=workouts, records=records, streak=streak,
+                   since=dates[0].isoformat() if dates else None,
+                   joined=(g.user["created_at"] or "")[:10] or None)
+
+
+@app.post("/api/profile/photo")
+@login_required
+def upload_avatar():
+    f = request.files.get("photo")
+    if not f:
+        raise ApiError("Фото не выбрано")
+    data = f.read()
+    ext = image_ext(data)
+    if not ext:
+        raise ApiError("Нужна картинка в формате JPG, PNG или WebP")
+    name = f"u{g.user['id']}_{secrets.token_hex(6)}{ext}"
+    with open(os.path.join(PHOTO_DIR, name), "wb") as out:
+        out.write(data)
+    conn = get_db()
+    conn.execute("UPDATE users SET avatar=? WHERE id=?", (name, g.user["id"]))
+    conn.commit()
+    remove_photo_file(g.user["avatar"])
+    return jsonify(ok=True, avatar_url=avatar_url(name))
+
+
+@app.delete("/api/profile/photo")
+@login_required
+def delete_avatar():
+    conn = get_db()
+    conn.execute("UPDATE users SET avatar=NULL WHERE id=?", (g.user["id"],))
+    conn.commit()
+    remove_photo_file(g.user["avatar"])
     return jsonify(ok=True)
 
 
@@ -683,6 +756,7 @@ def admin_delete_user(uid):
         raise ApiError("Для подтверждения введите логин пользователя точно")
     db.delete_user(conn, uid)
     conn.commit()
+    remove_photo_file(u["avatar"])
     return jsonify(ok=True)
 
 
@@ -1284,7 +1358,7 @@ def friends():
     conn = get_db()
     uid = g.user["id"]
     users = {r["id"]: r for r in conn.execute(
-        "SELECT id, username, share FROM users")}
+        "SELECT id, username, share, avatar FROM users")}
     sharing = {i for i, u in users.items() if u["share"] == 1}
     rows = conn.execute(
         """
@@ -1322,6 +1396,7 @@ def friends():
 
     def summary(wid, w):
         return {"id": wid, "username": users[w["user_id"]]["username"],
+                "avatar_url": avatar_url(users[w["user_id"]]["avatar"]),
                 "me": w["user_id"] == uid, "date": w["date"],
                 "kind_label": planner.KINDS.get(w["kind"], w["kind"]),
                 "exercises": len(w["max"]), "sets": w["sets"],
@@ -1340,6 +1415,7 @@ def friends():
         mine = [w for w in workouts.values()
                 if w["user_id"] == u and w["date"].startswith(month)]
         board.append({"username": users[u]["username"], "me": u == uid,
+                      "avatar_url": avatar_url(users[u]["avatar"]),
                       "visits": len({w["date"] for w in mine}),
                       "workouts": len(mine),
                       "volume": round(sum(w["volume"] for w in mine))})

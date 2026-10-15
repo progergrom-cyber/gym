@@ -423,5 +423,39 @@ class UpgradeTests(unittest.TestCase):
         conn.close()
 
 
+class AvatarTest(unittest.TestCase):
+    PNG = bytes([0x89]) + b"PNG" + bytes([13, 10, 26, 10]) + b"0" * 40
+
+    def test_upload_replace_delete(self):
+        import io
+        c = new_client("ava")
+        self.assertIsNone(c.get("/api/me").get_json()["profile"]["avatar_url"])
+        r = c.post("/api/profile/photo", data={"photo": (io.BytesIO(self.PNG), "a.png")},
+                   content_type="multipart/form-data")
+        first = r.get_json()["avatar_url"]
+        self.assertTrue(first.endswith(".png"))
+        self.assertEqual(c.get("/api/me").get_json()["profile"]["avatar_url"], first)
+        path = os.path.join(gym_app.PHOTO_DIR, os.path.basename(first))
+        self.assertTrue(os.path.exists(path))
+        # не картинка — отказ
+        r = c.post("/api/profile/photo", data={"photo": (io.BytesIO(b"hello"), "a.txt")},
+                   content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 400)
+        # замена удаляет старый файл
+        second = c.post("/api/profile/photo", data={"photo": (io.BytesIO(self.PNG), "b.png")},
+                        content_type="multipart/form-data").get_json()["avatar_url"]
+        self.assertNotEqual(first, second)
+        self.assertFalse(os.path.exists(path))
+        c.delete("/api/profile/photo")
+        self.assertIsNone(c.get("/api/me").get_json()["profile"]["avatar_url"])
+        self.assertFalse(os.path.exists(os.path.join(gym_app.PHOTO_DIR, os.path.basename(second))))
+
+    def test_summary(self):
+        c = new_client("summ")
+        s = c.get("/api/profile/summary").get_json()
+        self.assertEqual((s["workouts"], s["records"], s["streak"]), (0, 0, 0))
+        self.assertIsNone(s["since"])
+
+
 if __name__ == "__main__":
     unittest.main()

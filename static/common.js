@@ -19,6 +19,10 @@ const THEMES = {
   fire: { name: 'Огонь', desc: 'Тёплый графит и оранжевый, крупные заголовки', bg: '#120d0b', s: '#1e1714', a: '#ff6b2c', b: '#ffc247' },
   ocean: { name: 'Океан', desc: 'Глубокий синий и голубой, мягкие формы', bg: '#0a1220', s: '#121d31', a: '#3ecfff', b: '#9fb2ff' },
   light: { name: 'Светлая', desc: 'Белый фон и фиолетовый акцент — для яркого солнца', bg: '#f2f2f6', s: '#ffffff', a: '#6b4dff', b: '#d6336c' },
+  sakura: { name: 'Сакура', desc: 'Нежно-розовая, ветка сакуры и цветы вместо галочек', bg: '#fdf2f4', s: '#fffafb', a: '#d63a6e', b: '#f7b6c6' },
+  supra: { name: 'Супра', desc: 'Карбон, оранжевые гоночные полосы, шрифт «на скорости»', bg: '#111215', s: '#1b1d22', a: '#ff6b00', b: '#ff2d2d' },
+  monster: { name: 'Монстр', desc: 'Чёрная, кислотно-зелёный неон и следы когтей', bg: '#000000', s: '#0f120d', a: '#8cff1a', b: '#4f8f12' },
+  'monster-white': { name: 'Белый монстр', desc: 'Белая с серебром и чёрными следами когтей', bg: '#f1f2f0', s: '#ffffff', a: '#111111', b: '#b9bec4' },
 };
 
 function applyTheme(id) {
@@ -33,6 +37,13 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+// Кружок с фото пользователя или первой буквой имени
+function avatarHtml(name, url, cls = '') {
+  const inner = url ? `<img src="${esc(url)}" alt="" loading="lazy">`
+    : esc(String(name || '?').slice(0, 1).toUpperCase());
+  return `<span class="avatar ${cls}">${inner}</span>`;
 }
 
 // Хранилище на телефоне (localStorage). Всё обёрнуто в try на случай,

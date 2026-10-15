@@ -43,7 +43,70 @@ function fillProfile(p) {
   f.querySelectorAll('[name=injury]').forEach(c => { c.checked = p.injuries.includes(c.value); });
   $('#username').textContent = p.username;
   $('#admin-link').hidden = !p.is_admin;
+  renderAvatar(p);
 }
+
+// ---------- фото и цифры профиля ----------
+
+let profile = null;
+
+function renderAvatar(p) {
+  profile = p;
+  $('#me-name').textContent = p.username;
+  $('#ava-pic').innerHTML = p.avatar_url
+    ? `<img src="${esc(p.avatar_url)}" alt="Фото профиля">`
+    : `<span>${esc(p.username.slice(0, 1).toUpperCase())}</span>`;
+  $('#ava-del').hidden = !p.avatar_url;
+}
+
+const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля',
+  'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
+async function loadSummary() {
+  try {
+    const s = await api('GET', '/api/profile/summary');
+    $('#st-workouts').textContent = s.workouts;
+    $('#st-records').textContent = s.records;
+    $('#st-streak').textContent = s.streak;
+    const from = s.since || s.joined;
+    if (from) {
+      const [y, m] = from.split('-').map(Number);
+      $('#me-since').textContent = `${s.since ? 'Тренируется' : 'С нами'} с ${MONTHS_GEN[m - 1]} ${y}`;
+    }
+  } catch (e) { /* без связи — оставим прочерки */ }
+}
+
+$('#ava-btn').addEventListener('click', () => $('#ava-input').click());
+$('#ava-input').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  $('#ava-btn').classList.add('busy');
+  try {
+    const blob = await compressImage(file, 600, 0.85);
+    const form = new FormData();
+    form.append('photo', blob, 'photo.jpg');
+    const res = await api('POST', '/api/profile/photo', form);
+    renderAvatar({ ...profile, avatar_url: res.avatar_url });
+    store.set('me', await api('GET', '/api/me'));
+    toast('Фото обновлено ✓');
+  } catch (err) {
+    toast(err.message, 4000);
+  } finally {
+    $('#ava-btn').classList.remove('busy');
+  }
+});
+$('#ava-del').addEventListener('click', async () => {
+  if (!confirm('Удалить фото профиля?')) return;
+  try {
+    await api('DELETE', '/api/profile/photo');
+    renderAvatar({ ...profile, avatar_url: null });
+    store.set('me', await api('GET', '/api/me'));
+    toast('Фото удалено');
+  } catch (err) {
+    toast(err.message, 4000);
+  }
+});
 
 $('#p-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -310,5 +373,6 @@ renderNav('settings');
   try { me = await requireAuth(); } catch (e) { return; }
   fillProfile(me.profile);
   showTab(location.hash === '#catalog' ? 'catalog' : 'profile');
+  loadSummary();
   loadCatalog();
 })();
